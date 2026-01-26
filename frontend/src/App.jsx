@@ -2,58 +2,94 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import DoctorDashboard from "./pages/DoctorDashboard";
+import DoctorChat from "./pages/DoctorChat";
 import Profile from "./pages/Profile";
 import ContactDoctor from "./pages/ContactDoctor";
 import SignUp from "./pages/SignUp";
+import "./utils/roleHelper"; // Load role helper utilities
 
 export default function App() {
   const [loggedIn, setLoggedIn] = React.useState(
     localStorage.getItem("isLoggedIn") === "true"
   );
+  const [userRole, setUserRole] = React.useState(() => {
+    const role = localStorage.getItem("userRole");
+    console.log("App initial role from localStorage:", role);
+    return role || "patient";
+  });
 
   const handleLogin = () => {
+    const role = localStorage.getItem("userRole");
+    console.log("handleLogin - role from localStorage:", role);
     localStorage.setItem("isLoggedIn", "true");
     setLoggedIn(true);
+    setUserRole(role || "patient");
   };
 
   return (
     <Router>
       <Routes>
         <Route path="/login" element={<Login onLogin={handleLogin} />} />
+        <Route path="/signup" element={<SignUp />} />
+        
+        {/* Patient Routes */}
         <Route
           path="/dashboard"
-          element={loggedIn ? <Dashboard /> : <Navigate to="/login" replace />}
+          element={
+            loggedIn && userRole === "patient" ? (
+              <Dashboard />
+            ) : loggedIn && userRole === "doctor" ? (
+              <Navigate to="/doctor-dashboard" replace />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
         />
-        <Route path="/signup" element={<SignUp />} />
+        <Route
+          path="/contact-doctor"
+          element={
+            loggedIn && userRole === "patient" ? (
+              <ContactDoctor />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
 
+        {/* Doctor Routes */}
+        <Route
+          path="/doctor-dashboard"
+          element={
+            loggedIn && userRole === "doctor" ? (
+              <DoctorDashboard />
+            ) : loggedIn && userRole === "patient" ? (
+              <Navigate to="/dashboard" replace />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        <Route
+          path="/doctor-chat/:patientId"
+          element={
+            loggedIn && userRole === "doctor" ? (
+              <DoctorChat />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+
+        {/* Common Routes */}
         <Route
           path="/profile"
           element={loggedIn ? <Profile /> : <Navigate to="/login" replace />}
         />
-        <Route
-          path="/contact-doctor"
-          element={loggedIn ? <ContactDoctor /> : <Navigate to="/login" replace />}
-        />
+        
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>
   );
 }
 
-const styles = {
-  navbar: {
-    display: "flex",
-    gap: "20px",
-    justifyContent: "center",
-    padding: "15px",
-    backgroundColor: "#f8f9fa",
-    boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
-    marginBottom: "20px",
-  },
-  navLink: {
-    textDecoration: "none",
-    fontSize: "18px",
-    fontWeight: "bold",
-    color: "#007bff",
-  },
-};

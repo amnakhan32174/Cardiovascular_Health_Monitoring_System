@@ -18,10 +18,17 @@ export default function BloodSugarForm({ onSuccess }: BloodSugarFormProps) {
     setSaving(true);
 
     try {
+      const patientId = localStorage.getItem("userId");
+      if (!patientId) {
+        alert("Please log in to submit blood sugar readings.");
+        return;
+      }
+
       const reading = {
         blood_sugar: parseFloat(bloodSugar),
         meal_timing: mealTiming,
         notes: notes,
+        patientId,
         timestamp: serverTimestamp(),
       };
 
@@ -43,20 +50,20 @@ export default function BloodSugarForm({ onSuccess }: BloodSugarFormProps) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border-2 border-blue-100 p-8">
+    <div className="bg-[var(--card)] rounded-xl shadow-sm border border-[var(--border)] p-8">
       <div className="flex items-center gap-3 mb-6">
-        <div className="p-3 bg-gradient-to-br from-rose-500 to-rose-600 rounded-xl">
+        <div className="p-3 bg-[var(--primary)] rounded-xl">
           <Droplet className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Blood Sugar Reading</h2>
-          <p className="text-sm text-slate-600">Manual glucose level entry</p>
+          <h2 className="text-xl font-semibold text-[var(--foreground)]">Blood Sugar Reading</h2>
+          <p className="text-sm text-[var(--muted-foreground)]">Manual glucose level entry</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
+          <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
             Blood Sugar Level (mg/dL)
           </label>
           <input
@@ -64,20 +71,20 @@ export default function BloodSugarForm({ onSuccess }: BloodSugarFormProps) {
             step="0.1"
             value={bloodSugar}
             onChange={(e) => setBloodSugar(e.target.value)}
-            className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition"
+            className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
             placeholder="Enter blood sugar reading"
             required
           />
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
+          <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
             Meal Timing
           </label>
           <select
             value={mealTiming}
             onChange={(e) => setMealTiming(e.target.value)}
-            className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition"
+            className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
           >
             <option value="fasting">Fasting</option>
             <option value="before_meal">Before Meal</option>
@@ -87,13 +94,13 @@ export default function BloodSugarForm({ onSuccess }: BloodSugarFormProps) {
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
+          <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
             Notes (Optional)
           </label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition resize-none"
+            className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition resize-none bg-[var(--input-background)]"
             placeholder="Add any relevant notes..."
             rows={3}
           />
@@ -102,7 +109,7 @@ export default function BloodSugarForm({ onSuccess }: BloodSugarFormProps) {
         <button
           type="submit"
           disabled={saving}
-          className="w-full py-3 bg-gradient-to-r from-rose-500 to-rose-600 text-white rounded-lg font-semibold hover:from-rose-600 hover:to-rose-700 disabled:opacity-50 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+          className="w-full py-3 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 transition shadow-sm flex items-center justify-center gap-2"
         >
           {saving ? (
             <>

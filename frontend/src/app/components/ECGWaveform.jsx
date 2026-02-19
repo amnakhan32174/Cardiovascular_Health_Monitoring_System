@@ -35,8 +35,8 @@ export default function ECGWaveform({ ecgData, height = 200 }) {
     : generateSampleECG();
 
   return (
-    <div className="bg-white p-3 rounded border border-slate-200">
-      <div className="text-sm text-slate-700 mb-2 font-semibold">ECG Waveform</div>
+    <div className="bg-card border border-[var(--border)] rounded-[var(--radius)] p-3">
+      <div className="text-sm font-medium mb-2 text-[var(--foreground)]">ECG Waveform (Live)</div>
       <div style={{ width: "100%", height: height }}>
         <ResponsiveContainer>
           <LineChart data={chartData.slice(-500)} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -53,13 +53,15 @@ export default function ECGWaveform({ ecgData, height = 200 }) {
             <Tooltip 
               content={({ active, payload }) => {
                 if (active && payload && payload.length) {
+                  const val = payload[0].value;
+                  const is12bit = typeof val === "number" && val >= 0 && val <= 4095;
                   return (
                     <div className="bg-white p-2 border border-slate-300 rounded shadow-lg">
                       <p className="text-xs text-slate-600">
-                        Voltage: {payload[0].value.toFixed(3)} mV
+                        {is12bit ? `ADC: ${Math.round(val)} (12-bit)` : `Value: ${val}`}
                       </p>
                       <p className="text-xs text-slate-500">
-                        Time: {payload[0].payload.time}s
+                        Sample: {payload[0].payload.index}
                       </p>
                     </div>
                   );
@@ -70,16 +72,18 @@ export default function ECGWaveform({ ecgData, height = 200 }) {
             <Line
               type="monotone"
               dataKey="voltage"
-              stroke="#EF4444"
-              strokeWidth={1.5}
+              stroke="var(--chart-1)"
+              strokeWidth={2}
               dot={false}
               isAnimationActive={false}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <div className="text-xs text-slate-500 mt-1">
-        {ecgData ? "Live ECG Data" : "Sample ECG Waveform (Demo)"}
+      <div className="text-xs text-[var(--muted-foreground)] mt-1">
+        {ecgData && ecgData.length > 0
+          ? `Live ECG from sensor (${ecgData.length} samples)`
+          : "Sample ECG Waveform (Demo)"}
       </div>
     </div>
   );

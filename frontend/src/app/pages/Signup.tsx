@@ -1,25 +1,139 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Heart, Stethoscope, User } from "lucide-react";
 import { auth, db } from "../../firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+
+interface ValidationErrors {
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  name?: string;
+  age?: string;
+  sex?: string;
+  doctor?: string;
+  license?: string;
+  specialization?: string;
+  terms?: string;
+}
 
 export default function SignUp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
   const [sex, setSex] = useState("");
   const [role, setRole] = useState("patient");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [specialization, setSpecialization] = useState("");
+  const [assignedDoctorId, setAssignedDoctorId] = useState("");
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState("");
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const loadDoctors = async () => {
+      try {
+        const usersRef = collection(db, "users");
+        const q = query(usersRef, where("role", "==", "doctor"));
+        const snapshot = await getDocs(q);
+        const doctorList: any[] = [];
+        snapshot.forEach((docSnap) => {
+          doctorList.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setDoctors(doctorList);
+      } catch (err) {
+        console.error("Error loading doctors:", err);
+      }
+    };
+
+    loadDoctors();
+  }, []);
+
+  // Validate email format
+  function validateEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  // Validate form inputs
+  function validateForm(): boolean {
+    const errors: ValidationErrors = {};
+
+    // Email validation
+    if (!email) {
+      errors.email = "Email is required";
+    } else if (!validateEmail(email)) {
+      errors.email = "Invalid email address";
+    }
+
+    // Password validation
+    if (!password) {
+      errors.password = "Password is required";
+    } else if (password.length < 6) {
+      errors.password = "Password must be at least 6 characters";
+    }
+
+    // Confirm password validation
+    if (!confirmPassword) {
+      errors.confirmPassword = "Please confirm your password";
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = "Passwords do not match";
+    }
+
+    // Name validation
+    if (!name || name.trim().length === 0) {
+      errors.name = "Full name is required";
+    }
+
+    // Terms validation
+    if (!agreedToTerms) {
+      errors.terms = "You must agree to the Terms & Conditions";
+    }
+
+    // Role-specific validation
+    if (role === "patient") {
+      if (!age || Number(age) < 1 || Number(age) > 150) {
+        errors.age = "Please enter a valid age";
+      }
+      if (!sex) {
+        errors.sex = "Please select your sex";
+      }
+      if (!assignedDoctorId) {
+        errors.doctor = "Please select a doctor";
+      }
+    } else if (role === "doctor") {
+      if (!licenseNumber || licenseNumber.trim().length === 0) {
+        errors.license = "License number is required";
+      }
+      if (!specialization) {
+        errors.specialization = "Please select a specialization";
+      }
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
+    
+    // Clear previous errors
+    setError("");
+    setValidationErrors({});
+
+    // Validate form
+    if (!validateForm()) {
+      setError("Please fix the errors below");
+      return;
+    }
+
     try {
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
@@ -33,6 +147,7 @@ export default function SignUp() {
       if (role === "patient") {
         userData.age = age;
         userData.sex = sex;
+        userData.assignedDoctorId = assignedDoctorId;
       } else if (role === "doctor") {
         userData.licenseNumber = licenseNumber;
         userData.specialization = specialization;
@@ -74,23 +189,21 @@ export default function SignUp() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-rose-50 p-6">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_50%),radial-gradient(circle_at_70%_80%,rgba(244,63,94,0.1),transparent_50%)]"></div>
-      
+    <div className="min-h-screen flex items-center justify-center bg-[var(--background)] p-6">
       <form
-        className="relative bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border-2 border-blue-100"
+        className="relative bg-[var(--card)] p-8 rounded-xl shadow-sm w-full max-w-md border border-[var(--border)]"
         onSubmit={handleSignUp}
       >
         <div className="flex justify-center mb-6">
-          <div className="p-4 bg-gradient-to-br from-blue-500 to-rose-500 rounded-full">
+          <div className="p-4 bg-[var(--primary)] rounded-full">
             <Heart className="w-10 h-10 text-white" fill="white" />
           </div>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-center bg-gradient-to-r from-blue-600 to-rose-600 bg-clip-text text-transparent">
+        <h1 className="text-3xl font-bold mb-2 text-center text-[var(--foreground)]">
           Create Account
         </h1>
-        <p className="text-sm text-slate-600 text-center mb-6">
+        <p className="text-sm text-[var(--muted-foreground)] text-center mb-6">
           Join our cardiovascular monitoring platform
         </p>
 
@@ -102,15 +215,15 @@ export default function SignUp() {
 
         {/* Role Selection */}
         <div className="mb-4">
-          <label className="block text-sm font-semibold text-slate-700 mb-2">I am a:</label>
+          <label className="block text-sm font-medium text-[var(--foreground)] mb-2">I am a:</label>
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => setRole("patient")}
-              className={`flex flex-col items-center gap-2 py-3 px-4 rounded-xl border-2 font-semibold transition-all ${
+              className={`flex flex-col items-center gap-2 py-3 px-4 rounded-xl border font-medium transition-all ${
                 role === "patient"
-                  ? "bg-gradient-to-br from-rose-50 to-rose-100 border-rose-500 text-rose-700 shadow-lg"
-                  : "bg-slate-50 border-slate-300 text-slate-600 hover:border-slate-400 hover:shadow-md"
+                  ? "bg-[var(--accent)] border-[var(--primary)] text-[var(--primary)]"
+                  : "bg-[var(--muted)] border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--secondary)]"
               }`}
             >
               <User className="w-5 h-5" />
@@ -119,10 +232,10 @@ export default function SignUp() {
             <button
               type="button"
               onClick={() => setRole("doctor")}
-              className={`flex flex-col items-center gap-2 py-3 px-4 rounded-xl border-2 font-semibold transition-all ${
+              className={`flex flex-col items-center gap-2 py-3 px-4 rounded-xl border font-medium transition-all ${
                 role === "doctor"
-                  ? "bg-gradient-to-br from-blue-50 to-blue-100 border-blue-500 text-blue-700 shadow-lg"
-                  : "bg-slate-50 border-slate-300 text-slate-600 hover:border-slate-400 hover:shadow-md"
+                  ? "bg-[var(--accent)] border-[var(--primary)] text-[var(--primary)]"
+                  : "bg-[var(--muted)] border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--secondary)]"
               }`}
             >
               <Stethoscope className="w-5 h-5" />
@@ -132,7 +245,7 @@ export default function SignUp() {
         </div>
 
         <input
-          className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+          className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
           placeholder="Full Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -142,7 +255,7 @@ export default function SignUp() {
         {role === "patient" ? (
           <>
             <input
-              className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-rose-500 focus:border-rose-500"
+              className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
               type="number"
               placeholder="Age"
               value={age}
@@ -151,7 +264,7 @@ export default function SignUp() {
             />
 
             <select
-              className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-rose-500 focus:border-rose-500"
+              className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
               value={sex}
               onChange={(e) => setSex(e.target.value)}
               required
@@ -161,11 +274,33 @@ export default function SignUp() {
               <option value="Male">Male</option>
               <option value="Other">Other</option>
             </select>
+
+            <select
+              className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
+              value={assignedDoctorId}
+              onChange={(e) => setAssignedDoctorId(e.target.value)}
+              required
+              disabled={doctors.length === 0}
+            >
+              <option value="">
+                {doctors.length === 0 ? "No doctors available" : "Select Assigned Doctor"}
+              </option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctor.name || doctor.email || doctor.id}
+                </option>
+              ))}
+            </select>
+            {doctors.length === 0 && (
+              <p className="text-xs text-amber-600 mb-2">
+                No doctors found. Ask an admin to assign a doctor or create a doctor account first.
+              </p>
+            )}
           </>
         ) : (
           <>
             <input
-              className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
               placeholder="License Number"
               value={licenseNumber}
               onChange={(e) => setLicenseNumber(e.target.value)}
@@ -173,7 +308,7 @@ export default function SignUp() {
             />
 
             <select
-              className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
               value={specialization}
               onChange={(e) => setSpecialization(e.target.value)}
               required
@@ -188,40 +323,114 @@ export default function SignUp() {
           </>
         )}
 
-        <input
-          className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          type="email"
-          placeholder="Email Address"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <div className="mb-3">
+          <input
+            className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-[var(--ring)] bg-[var(--input-background)] transition ${
+              validationErrors.email ? 'border-red-500 bg-red-50' : 'border-[var(--border)]'
+            }`}
+            type="email"
+            placeholder="Email Address"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (validationErrors.email) {
+                setValidationErrors(prev => ({...prev, email: undefined}));
+              }
+            }}
+            required
+          />
+          {validationErrors.email && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.email}</p>
+          )}
+        </div>
 
-        <input
-          className="w-full p-3 border-2 border-slate-200 rounded-lg mb-4 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          type="password"
-          placeholder="Create Password (min 6 characters)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={6}
-        />
+        <div className="mb-3">
+          <input
+            className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-[var(--ring)] bg-[var(--input-background)] transition ${
+              validationErrors.password ? 'border-red-500 bg-red-50' : 'border-[var(--border)]'
+            }`}
+            type="password"
+            placeholder="Create Password (min 6 characters)"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (validationErrors.password) {
+                setValidationErrors(prev => ({...prev, password: undefined}));
+              }
+            }}
+            required
+            minLength={6}
+          />
+          {validationErrors.password && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.password}</p>
+          )}
+        </div>
+
+        <div className="mb-4">
+          <input
+            className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-[var(--ring)] bg-[var(--input-background)] transition ${
+              validationErrors.confirmPassword ? 'border-red-500 bg-red-50' : 'border-[var(--border)]'
+            }`}
+            type="password"
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (validationErrors.confirmPassword) {
+                setValidationErrors(prev => ({...prev, confirmPassword: undefined}));
+              }
+            }}
+            required
+          />
+          {validationErrors.confirmPassword && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.confirmPassword}</p>
+          )}
+        </div>
+
+        {/* Terms and Conditions Checkbox */}
+        <div className="mb-4">
+          <          label className={`flex items-start gap-2 cursor-pointer p-3 rounded-lg border transition ${
+            validationErrors.terms ? 'border-red-500 bg-red-50' : 'border-[var(--border)] hover:border-[var(--primary)]'
+          }`}>
+            <input
+              type="checkbox"
+              checked={agreedToTerms}
+              onChange={(e) => {
+                setAgreedToTerms(e.target.checked);
+                if (validationErrors.terms) {
+                  setValidationErrors(prev => ({...prev, terms: undefined}));
+                }
+              }}
+              className="mt-1 w-4 h-4 text-[var(--primary)] border-slate-300 rounded focus:ring-[var(--ring)]"
+              required
+            />
+            <span className="text-sm text-[var(--foreground)]">
+              I agree to the{" "}
+              <span className="text-[var(--primary)] font-semibold hover:underline">
+                Terms & Conditions
+              </span>{" "}
+              and{" "}
+              <span className="text-[var(--primary)] font-semibold hover:underline">
+                Privacy Policy
+              </span>
+            </span>
+          </label>
+          {validationErrors.terms && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.terms}</p>
+          )}
+        </div>
 
         <button
-          className={`w-full py-3 text-white rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 ${
-            role === "doctor"
-              ? "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
-              : "bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700"
-          }`}
+          className="w-full py-3 text-white rounded-lg font-medium transition-all shadow-sm bg-[var(--primary)] hover:bg-orange-600"
           type="submit"
         >
           Sign Up as {role === "doctor" ? "Doctor" : "Patient"}
         </button>
 
-        <p className="text-center mt-6 text-slate-600">
+        <p className="text-center mt-6 text-[var(--muted-foreground)]">
           Already have an account?{" "}
           <span
-            className="text-blue-600 cursor-pointer font-semibold hover:text-blue-700 hover:underline"
+            className="text-[var(--primary)] cursor-pointer font-semibold hover:text-orange-600 hover:underline"
             onClick={() => navigate("/login")}
           >
             Login

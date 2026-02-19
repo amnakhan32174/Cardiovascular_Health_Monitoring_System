@@ -1,5 +1,3 @@
-// Helper functions for role management
-
 export const getStoredRole = () => {
   return localStorage.getItem("userRole");
 };
@@ -25,7 +23,8 @@ export const checkUserRole = async (userId, db) => {
 
 // Debug function - can be called from browser console
 if (typeof window !== "undefined") {
-  window.fixDoctorRole = (email) => {
+
+  window.fixDoctorRole = () => {
     const role = localStorage.getItem("userRole");
     if (role !== "doctor") {
       localStorage.setItem("userRole", "doctor");
@@ -36,6 +35,3 @@ if (typeof window !== "undefined") {
     }
   };
 }
-
-
-

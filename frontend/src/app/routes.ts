@@ -8,6 +8,7 @@ import Profile from "./pages/Profile";
 import ContactDoctor from "./pages/ContactDoctor";
 import DoctorChat from "./pages/DoctorChat";
 import LoginWrapper from "./pages/LoginWrapper";
+import AdminDashboard from "./pages/AdminDashboard";
 
 export const router = createBrowserRouter([
   {
@@ -41,5 +42,9 @@ export const router = createBrowserRouter([
   {
     path: "/doctor-chat/:patientId",
     Component: DoctorChat,
+  },
+  {
+    path: "/admin-dashboard",
+    Component: AdminDashboard,
   },
 ]);

@@ -36,28 +36,26 @@ export default function Profile() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-rose-50 p-6">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_50%),radial-gradient(circle_at_70%_80%,rgba(244,63,94,0.1),transparent_50%)]"></div>
-      
-      <div className="relative max-w-2xl mx-auto">
+    <div className="min-h-screen bg-[var(--background)] p-6">
+      <div className="max-w-2xl mx-auto">
         <button
           onClick={() => navigate(-1)}
-          className="mb-6 flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors font-medium"
+          className="mb-6 flex items-center gap-2 text-[var(--muted-foreground)] hover:text-[var(--primary)] transition-colors font-medium"
         >
           <ArrowLeft className="w-5 h-5" />
           Back
         </button>
 
-        <div className="bg-white rounded-2xl shadow-2xl border-2 border-blue-100 overflow-hidden">
+        <div className="bg-[var(--card)] rounded-xl shadow-sm border border-[var(--border)] overflow-hidden">
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-rose-600 p-8 text-white">
+          <div className="bg-[var(--primary)] p-8 text-white">
             <div className="flex items-center gap-4">
               <div className="p-4 bg-white/20 backdrop-blur-sm rounded-full">
                 <User className="w-8 h-8" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold">User Profile</h1>
-                <p className="text-blue-100 mt-1">Manage your personal information</p>
+                <h1 className="text-2xl font-semibold">User Profile</h1>
+                <p className="text-white/80 mt-1">Manage your personal information</p>
               </div>
             </div>
           </div>
@@ -66,7 +64,7 @@ export default function Profile() {
           <form onSubmit={handleSubmit} className="p-8">
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
                   Full Name
                 </label>
                 <input
@@ -74,14 +72,14 @@ export default function Profile() {
                   name="name"
                   value={profile.name}
                   onChange={handleChange}
-                  className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                  className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
                   placeholder="Enter full name"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
                   Age
                 </label>
                 <input
@@ -89,7 +87,7 @@ export default function Profile() {
                   name="age"
                   value={profile.age}
                   onChange={handleChange}
-                  className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                  className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
                   placeholder="Enter age"
                   min="0"
                   required
@@ -97,14 +95,14 @@ export default function Profile() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
                   Sex
                 </label>
                 <select
                   name="sex"
                   value={profile.sex}
                   onChange={handleChange}
-                  className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                  className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
                   required
                 >
                   <option value="">Select</option>
@@ -117,7 +115,7 @@ export default function Profile() {
 
             <button 
               type="submit" 
-              className="mt-8 w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
+              className="mt-8 w-full py-3 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-orange-600 transition shadow-sm flex items-center justify-center gap-2"
             >
               <Save className="w-5 h-5" />
               Save Profile

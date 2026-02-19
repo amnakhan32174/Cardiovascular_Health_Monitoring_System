@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { db } from "../../firebase";
 
 export default function SnapshotButton({ currentVitals, onSnapshotTaken }) {
   const [isCapturing, setIsCapturing] = useState(false);

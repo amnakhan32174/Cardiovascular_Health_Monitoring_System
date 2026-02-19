@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from "react";
-import { Activity, Heart, Droplets } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Activity } from "lucide-react";
 
 interface LiveSensorProps {
   deviceId?: string;
@@ -8,40 +8,42 @@ interface LiveSensorProps {
 
 export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps) {
   const [vitals, setVitals] = useState({
-    hr: 0,
-    spo2: 0,
-    sbp: 0,
-    dbp: 0,
     mean_bp: 0,
-    smoothed_hr: 0,
   });
   const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Simulate sensor connection
-    setIsConnected(true);
+    let isMounted = true;
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
-    // Simulate real-time data
-    const interval = setInterval(() => {
-      const newVitals = {
-        hr: Math.floor(60 + Math.random() * 40),
-        smoothed_hr: Math.floor(65 + Math.random() * 30),
-        spo2: Math.floor(94 + Math.random() * 6),
-        sbp: Math.floor(110 + Math.random() * 30),
-        dbp: Math.floor(70 + Math.random() * 20),
-        mean_bp: Math.floor(80 + Math.random() * 20),
-      };
-      
-      setVitals(newVitals);
-      
-      if (onVitalsUpdate) {
-        onVitalsUpdate(newVitals);
+    const fetchPrediction = async () => {
+      try {
+        setError(null);
+        const response = await fetch(`${backendUrl}/api/predict-from-csv`);
+        const payload = await response.json();
+        if (!response.ok || !payload?.data) {
+          throw new Error(payload?.error || "Prediction failed");
+        }
+
+        const newVitals = { mean_bp: payload.data.mean_bp };
+        if (!isMounted) return;
+        setVitals(newVitals);
+        setIsConnected(true);
+        if (onVitalsUpdate) {
+          onVitalsUpdate(newVitals);
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+        setError(err.message || "Failed to load prediction");
+        setIsConnected(false);
       }
-    }, 2000);
+    };
+
+    fetchPrediction();
 
     return () => {
-      clearInterval(interval);
-      setIsConnected(false);
+      isMounted = false;
     };
   }, [deviceId, onVitalsUpdate]);
 
@@ -50,58 +52,27 @@ export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps
       {/* Connection Status */}
       <div className="flex items-center gap-2 mb-4">
         <div className={`w-3 h-3 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`}></div>
-        <span className="text-sm text-slate-600">
-          {isConnected ? "Sensor Connected" : "Disconnected"}
+        <span className="text-sm text-[var(--muted-foreground)]">
+          {error ? "Prediction Error" : isConnected ? "Sensor Connected" : "Disconnected"}
         </span>
       </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {/* Vitals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-rose-50 to-rose-100 border-2 border-rose-200 rounded-xl p-6">
+      <div className="grid grid-cols-1 gap-4">
+        <div className="bg-[var(--muted)] border border-[var(--border)] rounded-xl p-6">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-rose-200 rounded-lg">
-              <Heart className="w-6 h-6 text-rose-700" />
+            <div className="p-2 bg-[var(--accent)] rounded-lg">
+              <Activity className="w-6 h-6 text-[var(--primary)]" />
             </div>
             <div>
-              <p className="text-sm font-medium text-rose-700">Heart Rate</p>
+              <p className="text-sm font-medium text-[var(--foreground)]">Mean Arterial Pressure</p>
             </div>
           </div>
-          <p className="text-4xl font-bold text-rose-700">
-            {vitals.hr || vitals.smoothed_hr || "—"}
+          <p className="text-4xl font-bold text-[var(--foreground)]">
+            {vitals.mean_bp ? Math.round(vitals.mean_bp) : "—"}
           </p>
-          <p className="text-sm text-rose-600 mt-1">BPM</p>
-        </div>
-
-        <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-blue-200 rounded-lg">
-              <Activity className="w-6 h-6 text-blue-700" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-blue-700">Blood Pressure</p>
-            </div>
-          </div>
-          <p className="text-4xl font-bold text-blue-700">
-            {vitals.sbp && vitals.dbp ? `${vitals.sbp}/${vitals.dbp}` : "—"}
-          </p>
-          <p className="text-sm text-blue-600 mt-1">
-            {vitals.mean_bp ? `Mean: ${Math.round(vitals.mean_bp)} mmHg` : "mmHg"}
-          </p>
-        </div>
-
-        <div className="bg-gradient-to-br from-cyan-50 to-cyan-100 border-2 border-cyan-200 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-cyan-200 rounded-lg">
-              <Droplets className="w-6 h-6 text-cyan-700" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-cyan-700">SpO₂</p>
-            </div>
-          </div>
-          <p className="text-4xl font-bold text-cyan-700">
-            {vitals.spo2 ? `${vitals.spo2}%` : "—"}
-          </p>
-          <p className="text-sm text-cyan-600 mt-1">Oxygen Saturation</p>
+          <p className="text-sm text-[var(--muted-foreground)] mt-1">mmHg</p>
         </div>
       </div>
 

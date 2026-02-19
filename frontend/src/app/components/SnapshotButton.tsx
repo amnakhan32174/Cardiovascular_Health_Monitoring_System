@@ -27,7 +27,7 @@ export default function SnapshotButton({ currentVitals, onSnapshotTaken }: Snaps
     <button
       onClick={handleSnapshot}
       disabled={!currentVitals}
-      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-rose-500 to-rose-600 text-white rounded-lg font-semibold hover:from-rose-600 hover:to-rose-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl text-sm"
+      className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm text-sm"
     >
       <Camera className="w-4 h-4" />
       Snapshot

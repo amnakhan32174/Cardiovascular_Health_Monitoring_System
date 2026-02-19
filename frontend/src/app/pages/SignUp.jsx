@@ -1,24 +1,125 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase"; // Make sure db is exported in firebase.js
+import { auth, db } from "../../firebase"; // Make sure db is exported in firebase.js
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 
 export default function SignUp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
   const [sex, setSex] = useState("");
   const [role, setRole] = useState("patient"); // patient or doctor
   const [licenseNumber, setLicenseNumber] = useState(""); // For doctors
   const [specialization, setSpecialization] = useState(""); // For doctors
+  const [assignedDoctorId, setAssignedDoctorId] = useState("");
+  const [doctors, setDoctors] = useState([]);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState("");
+  const [validationErrors, setValidationErrors] = useState({});
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const loadDoctors = async () => {
+      try {
+        const usersRef = collection(db, "users");
+        const q = query(usersRef, where("role", "==", "doctor"));
+        const snapshot = await getDocs(q);
+        const doctorList = [];
+        snapshot.forEach((docSnap) => {
+          doctorList.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setDoctors(doctorList);
+      } catch (err) {
+        console.error("Error loading doctors:", err);
+      }
+    };
+
+    loadDoctors();
+  }, []);
+
+  // Validate email format
+  function validateEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  // Validate form inputs
+  function validateForm() {
+    const errors = {};
+
+    // Email validation
+    if (!email) {
+      errors.email = "Email is required";
+    } else if (!validateEmail(email)) {
+      errors.email = "Invalid email address";
+    }
+
+    // Password validation
+    if (!password) {
+      errors.password = "Password is required";
+    } else if (password.length < 6) {
+      errors.password = "Password must be at least 6 characters";
+    }
+
+    // Confirm password validation
+    if (!confirmPassword) {
+      errors.confirmPassword = "Please confirm your password";
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = "Passwords do not match";
+    }
+
+    // Name validation
+    if (!name || name.trim().length === 0) {
+      errors.name = "Full name is required";
+    }
+
+    // Terms validation
+    if (!agreedToTerms) {
+      errors.terms = "You must agree to the Terms & Conditions";
+    }
+
+    // Role-specific validation
+    if (role === "patient") {
+      if (!age || age < 1 || age > 150) {
+        errors.age = "Please enter a valid age";
+      }
+      if (!sex) {
+        errors.sex = "Please select your sex";
+      }
+      if (!assignedDoctorId) {
+        errors.doctor = "Please select a doctor";
+      }
+    } else if (role === "doctor") {
+      if (!licenseNumber || licenseNumber.trim().length === 0) {
+        errors.license = "License number is required";
+      }
+      if (!specialization) {
+        errors.specialization = "Please select a specialization";
+      }
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
 
   async function handleSignUp(e) {
     e.preventDefault();
+    
+    // Clear previous errors
+    setError("");
+    setValidationErrors({});
+
+    // Validate form
+    if (!validateForm()) {
+      setError("Please fix the errors below");
+      return;
+    }
+
     try {
+
       // Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -34,6 +135,7 @@ export default function SignUp() {
       if (role === "patient") {
         userData.age = age;
         userData.sex = sex;
+        userData.assignedDoctorId = assignedDoctorId;
       } else if (role === "doctor") {
         userData.licenseNumber = licenseNumber;
         userData.specialization = specialization;
@@ -148,6 +250,28 @@ export default function SignUp() {
               <option value="Male">Male</option>
               <option value="Other">Other</option>
             </select>
+
+            <select
+              className="w-full p-3 border border-slate-300 rounded-lg mb-3 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+              value={assignedDoctorId}
+              onChange={(e) => setAssignedDoctorId(e.target.value)}
+              required
+              disabled={doctors.length === 0}
+            >
+              <option value="">
+                {doctors.length === 0 ? "No doctors available" : "Select Assigned Doctor"}
+              </option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctor.name || doctor.email || doctor.id}
+                </option>
+              ))}
+            </select>
+            {doctors.length === 0 && (
+              <p className="text-xs text-amber-600 mb-2">
+                No doctors found. Ask an admin to assign a doctor or create a doctor account first.
+              </p>
+            )}
           </>
         ) : (
           <>
@@ -175,24 +299,102 @@ export default function SignUp() {
           </>
         )}
 
-        <input
-          className="w-full p-3 border border-slate-300 rounded-lg mb-3 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-          type="email"
-          placeholder="Email Address"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <div className="mb-3">
+          <input
+            className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition ${
+              validationErrors.email ? 'border-red-500 bg-red-50' : 'border-slate-300'
+            }`}
+            type="email"
+            placeholder="Email Address"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (validationErrors.email) {
+                setValidationErrors(prev => ({...prev, email: undefined}));
+              }
+            }}
+            required
+          />
+          {validationErrors.email && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.email}</p>
+          )}
+        </div>
 
-        <input
-          className="w-full p-3 border border-slate-300 rounded-lg mb-4 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-          type="password"
-          placeholder="Create Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={6}
-        />
+        <div className="mb-3">
+          <input
+            className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition ${
+              validationErrors.password ? 'border-red-500 bg-red-50' : 'border-slate-300'
+            }`}
+            type="password"
+            placeholder="Create Password (min 6 characters)"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (validationErrors.password) {
+                setValidationErrors(prev => ({...prev, password: undefined}));
+              }
+            }}
+            required
+            minLength={6}
+          />
+          {validationErrors.password && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.password}</p>
+          )}
+        </div>
+
+        <div className="mb-4">
+          <input
+            className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition ${
+              validationErrors.confirmPassword ? 'border-red-500 bg-red-50' : 'border-slate-300'
+            }`}
+            type="password"
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (validationErrors.confirmPassword) {
+                setValidationErrors(prev => ({...prev, confirmPassword: undefined}));
+              }
+            }}
+            required
+          />
+          {validationErrors.confirmPassword && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.confirmPassword}</p>
+          )}
+        </div>
+
+        {/* Terms and Conditions Checkbox */}
+        <div className="mb-4">
+          <label className={`flex items-start gap-2 cursor-pointer p-3 rounded-lg border transition ${
+            validationErrors.terms ? 'border-red-500 bg-red-50' : 'border-slate-200 hover:border-emerald-500'
+          }`}>
+            <input
+              type="checkbox"
+              checked={agreedToTerms}
+              onChange={(e) => {
+                setAgreedToTerms(e.target.checked);
+                if (validationErrors.terms) {
+                  setValidationErrors(prev => ({...prev, terms: undefined}));
+                }
+              }}
+              className="mt-1 w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+              required
+            />
+            <span className="text-sm text-slate-700">
+              I agree to the{" "}
+              <span className="text-emerald-600 font-semibold hover:underline">
+                Terms & Conditions
+              </span>{" "}
+              and{" "}
+              <span className="text-emerald-600 font-semibold hover:underline">
+                Privacy Policy
+              </span>
+            </span>
+          </label>
+          {validationErrors.terms && (
+            <p className="text-red-600 text-xs mt-1">{validationErrors.terms}</p>
+          )}
+        </div>
 
         <button
           className={`w-full py-3 text-white rounded-lg font-semibold transition-all shadow-md hover:shadow-lg ${

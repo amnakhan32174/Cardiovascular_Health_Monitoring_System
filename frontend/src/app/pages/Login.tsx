@@ -72,7 +72,10 @@ export default function Login({ onLogin }: LoginProps) {
       
       onLogin();
       
-      if (role === "doctor") {
+      if (role === "admin") {
+        console.log("Redirecting to admin dashboard");
+        navigate("/admin-dashboard");
+      } else if (role === "doctor") {
         console.log("Redirecting to doctor dashboard");
         navigate("/doctor-dashboard");
       } else {
@@ -103,20 +106,18 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-rose-50">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_50%),radial-gradient(circle_at_70%_80%,rgba(244,63,94,0.1),transparent_50%)]"></div>
-      
-      <form className="relative bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border-2 border-blue-100" onSubmit={handleLogin}>
+    <div className="min-h-screen flex items-center justify-center bg-[var(--background)]">
+      <form className="relative bg-[var(--card)] p-8 rounded-xl shadow-sm w-full max-w-md border border-[var(--border)]" onSubmit={handleLogin}>
         <div className="flex justify-center mb-6">
-          <div className="p-4 bg-gradient-to-br from-blue-500 to-rose-500 rounded-full">
+          <div className="p-4 bg-[var(--primary)] rounded-full">
             <Heart className="w-10 h-10 text-white" fill="white" />
           </div>
         </div>
         
-        <h1 className="text-3xl font-bold mb-2 text-center bg-gradient-to-r from-blue-600 to-rose-600 bg-clip-text text-transparent">
+        <h1 className="text-3xl font-bold mb-2 text-center text-[var(--foreground)]">
           CardioMonitor
         </h1>
-        <p className="text-sm text-slate-600 text-center mb-6">
+        <p className="text-sm text-[var(--muted-foreground)] text-center mb-6">
           Cardiovascular Health Monitoring System
         </p>
         
@@ -127,7 +128,7 @@ export default function Login({ onLogin }: LoginProps) {
         )}
 
         <input
-          className="w-full p-3 border-2 border-slate-200 rounded-lg mb-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+          className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
           placeholder="Email Address"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -135,7 +136,7 @@ export default function Login({ onLogin }: LoginProps) {
           required
         />
         <input
-          className="w-full p-3 border-2 border-slate-200 rounded-lg mb-4 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+          className="w-full p-3 border border-[var(--border)] rounded-lg mb-4 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
           type="password"
           placeholder="Password"
           value={password}
@@ -143,14 +144,14 @@ export default function Login({ onLogin }: LoginProps) {
           required
         />
         
-        <button className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5">
+        <button className="w-full py-3 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-orange-600 transition shadow-sm">
           Sign In
         </button>
 
-        <p className="text-center mt-6 text-slate-600">
+        <p className="text-center mt-6 text-[var(--muted-foreground)]">
           Don't have an account?{" "}
           <span
-            className="text-blue-600 cursor-pointer font-semibold hover:text-blue-700 hover:underline"
+            className="text-[var(--primary)] cursor-pointer font-semibold hover:text-orange-600 hover:underline"
             onClick={() => navigate("/signup")}
           >
             Sign Up

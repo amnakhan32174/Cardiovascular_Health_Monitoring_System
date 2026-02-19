@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { Send, ArrowLeft, AlertCircle, AlertTriangle, MessageCircle } from "lucide-react";
 import io from "socket.io-client";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, where } from "firebase/firestore";
 import { db } from "../../firebase";
 
 const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
@@ -12,19 +12,52 @@ export default function ContactDoctor() {
   const [message, setMessage] = useState("");
   const [urgency, setUrgency] = useState("Normal");
   const [chat, setChat] = useState<any[]>([]);
+  const [assignedDoctorId, setAssignedDoctorId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const role = localStorage.getItem("userRole");
+    if (role !== "patient") {
+      navigate(role === "doctor" ? "/doctor-dashboard" : "/login");
+      return;
+    }
+
+    const userId = localStorage.getItem("userId");
+    if (!userId) {
+      navigate("/login");
+      return;
+    }
+
+    const loadPatient = async () => {
+      try {
+        const userDoc = await getDoc(doc(db, "users", userId));
+        if (!userDoc.exists()) {
+          console.warn("User doc not found for patient");
+          setAssignedDoctorId(null);
+        } else {
+          const data: any = userDoc.data();
+          setAssignedDoctorId(data.assignedDoctorId || null);
+        }
+      } catch (error) {
+        console.error("Error loading patient profile:", error);
+        setAssignedDoctorId(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadPatient();
+
     socketRef.current = io(SOCKET_URL);
     const socket = socketRef.current;
 
     socket.on("connect", () => {
       console.log("Connected to chat server");
       setIsConnected(true);
-      
-      const userId = localStorage.getItem("userId") || "patient-001";
+
       socket.emit("join_room", { userId, role: "patient" });
     });
 
@@ -34,6 +67,8 @@ export default function ContactDoctor() {
     });
 
     socket.on("chat_message", (data: any) => {
+      if (!userId || !assignedDoctorId) return;
+      if (data.patientId !== userId || data.doctorId !== assignedDoctorId) return;
       setChat(prev => [...prev, {
         text: data.message,
         sender: data.sender || "Doctor",
@@ -43,35 +78,62 @@ export default function ContactDoctor() {
       }]);
     });
 
-    const savedChat = localStorage.getItem("doctorChat");
-    if (savedChat) {
-      try {
-        setChat(JSON.parse(savedChat));
-      } catch (e) {
-        console.error("Error loading chat history:", e);
-      }
-    }
-
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [assignedDoctorId, navigate]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    localStorage.setItem("doctorChat", JSON.stringify(chat));
   }, [chat]);
+
+  useEffect(() => {
+    const userId = localStorage.getItem("userId");
+    if (!userId || !assignedDoctorId) return;
+
+    const chatRef = collection(db, "chatMessages");
+    const q = query(
+      chatRef,
+      where("patientId", "==", userId),
+      where("doctorId", "==", assignedDoctorId),
+      orderBy("timestamp", "asc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const messages: any[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        messages.push({
+          id: docSnap.id,
+          ...data,
+          time: data.timestamp?.toDate
+            ? data.timestamp.toDate().toLocaleTimeString()
+            : new Date(data.createdAt || Date.now()).toLocaleTimeString()
+        });
+      });
+      setChat(messages);
+    });
+
+    return () => unsubscribe();
+  }, [assignedDoctorId]);
 
   const sendMessage = async () => {
     if (message.trim() === "") return;
+    const userId = localStorage.getItem("userId");
+    if (!userId || !assignedDoctorId) return;
 
     const newMessage = {
       text: message,
       urgency,
       sender: "Patient",
+      patientId: userId,
+      doctorId: assignedDoctorId,
+      readByDoctor: false,
+      readAt: null,
       time: new Date().toLocaleTimeString(),
       id: Date.now(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     };
 
     setChat(prev => [...prev, newMessage]);
@@ -82,14 +144,17 @@ export default function ContactDoctor() {
         message: newMessage.text,
         sender: "Patient",
         urgency: newMessage.urgency,
-        timestamp: newMessage.timestamp
+        timestamp: newMessage.timestamp,
+        patientId: newMessage.patientId,
+        doctorId: newMessage.doctorId
       });
     }
 
     try {
       await addDoc(collection(db, "chatMessages"), {
         ...newMessage,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        createdAt: newMessage.createdAt
       });
     } catch (error) {
       console.error("Error saving message:", error);
@@ -119,29 +184,27 @@ export default function ContactDoctor() {
         };
       default:
         return {
-          bg: "bg-blue-50 border-l-4 border-blue-300",
-          badge: "bg-blue-500 text-white",
+          bg: "bg-[var(--accent)] border-l-4 border-[var(--primary)]",
+          badge: "bg-[var(--primary)] text-white",
           icon: null
         };
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-rose-50 p-6">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.05),transparent_50%),radial-gradient(circle_at_70%_80%,rgba(244,63,94,0.05),transparent_50%)]"></div>
-      
-      <div className="relative max-w-4xl mx-auto">
-        <div className="bg-white/90 backdrop-blur-sm p-6 shadow-2xl rounded-2xl border-2 border-blue-200">
-          <div className="flex items-center justify-between mb-6 pb-6 border-b-2 border-blue-100">
+    <div className="min-h-screen bg-[var(--background)] p-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-[var(--card)] p-6 shadow-sm rounded-xl border border-[var(--border)]">
+          <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border)]">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-gradient-to-br from-blue-500 to-rose-500 rounded-xl">
+              <div className="w-12 h-12 bg-[var(--primary)] rounded-xl flex items-center justify-center">
                 <MessageCircle className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-rose-600 bg-clip-text text-transparent">
+                <h2 className="text-xl font-semibold text-[var(--foreground)]">
                   Contact Doctor
                 </h2>
-                <p className="text-sm text-slate-600 mt-1">
+                <p className="text-sm text-[var(--muted-foreground)] mt-1">
                   Real-time chat with your healthcare provider
                 </p>
               </div>
@@ -158,11 +221,11 @@ export default function ContactDoctor() {
 
           {/* Urgency Selector */}
           <div className="mb-4">
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
               Message Urgency Level
             </label>
             <select
-              className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+              className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] font-medium bg-[var(--input-background)]"
               value={urgency}
               onChange={(e) => setUrgency(e.target.value)}
             >
@@ -173,13 +236,28 @@ export default function ContactDoctor() {
           </div>
 
           {/* Chat Display */}
-          <div className="bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 rounded-xl h-96 overflow-y-auto mb-4 border-2 border-blue-100">
-            {chat.length === 0 ? (
+          <div className="bg-[var(--muted)] p-4 rounded-xl h-96 overflow-y-auto mb-4 border border-[var(--border)]">
+            {isLoading ? (
               <div className="flex flex-col items-center justify-center h-full">
-                <div className="p-4 bg-blue-100 rounded-full mb-4">
-                  <MessageCircle className="w-8 h-8 text-blue-600" />
+                <div className="animate-spin rounded-full h-8 w-8 border-4 border-[var(--primary)] border-t-transparent mb-3"></div>
+                <p className="text-[var(--muted-foreground)] font-medium">Loading messages...</p>
+              </div>
+            ) : !assignedDoctorId ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="p-4 bg-amber-100 rounded-full mb-4">
+                  <AlertTriangle className="w-8 h-8 text-amber-600" />
                 </div>
-                <p className="text-slate-500 font-medium">No messages yet</p>
+                <p className="text-slate-700 font-medium">No doctor assigned</p>
+                <p className="text-sm text-slate-500 mt-1">
+                  Please contact support to assign a doctor to your account.
+                </p>
+              </div>
+            ) : chat.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="p-4 bg-[var(--accent)] rounded-full mb-4">
+                  <MessageCircle className="w-8 h-8 text-[var(--primary)]" />
+                </div>
+                <p className="text-[var(--muted-foreground)] font-medium">No messages yet</p>
                 <p className="text-sm text-slate-400 mt-1">Start a conversation with your doctor</p>
               </div>
             ) : (
@@ -189,11 +267,10 @@ export default function ContactDoctor() {
                   return (
                     <div
                       key={msg.id || Date.now()}
-                      className={`p-4 rounded-xl shadow-md ${
-                        msg.sender === "Patient"
-                          ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white ml-auto max-w-[80%]"
-                          : "bg-white mr-auto max-w-[80%] border-2 border-blue-100"
-                      } ${msg.urgency !== "Normal" && msg.sender === "Patient" ? urgencyStyles.bg : ""}`}
+                      className={`p-4 rounded-xl shadow-sm ${msg.sender === "Patient"
+                          ? "bg-[var(--primary)] text-white ml-auto max-w-[80%]"
+                          : "bg-[var(--card)] mr-auto max-w-[80%] border border-[var(--border)]"
+                        } ${msg.urgency !== "Normal" && msg.sender === "Patient" ? urgencyStyles.bg : ""}`}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -228,7 +305,7 @@ export default function ContactDoctor() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyPress={handleKeyPress}
-              className="flex-1 p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              className="flex-1 p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] resize-none bg-[var(--input-background)]"
               placeholder="Type your message to the doctor... (Press Enter to send)"
               rows={3}
             ></textarea>
@@ -237,15 +314,15 @@ export default function ContactDoctor() {
           <div className="flex justify-between">
             <button
               onClick={() => navigate("/dashboard")}
-              className="flex items-center gap-2 px-6 py-3 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-semibold transition-all border-2 border-slate-200"
+              className="flex items-center gap-2 px-6 py-3 bg-[var(--muted)] text-[var(--foreground)] rounded-lg hover:bg-[var(--secondary)] font-medium transition border border-[var(--border)]"
             >
               <ArrowLeft className="w-4 h-4" />
               Back to Dashboard
             </button>
             <button
               onClick={sendMessage}
-              disabled={!message.trim() || !isConnected}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
+              disabled={!message.trim() || !isConnected || !assignedDoctorId}
+              className="flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-orange-600 font-medium disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
             >
               <Send className="w-4 h-4" />
               Send Message

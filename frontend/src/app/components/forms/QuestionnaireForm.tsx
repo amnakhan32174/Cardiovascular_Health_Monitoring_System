@@ -22,7 +22,7 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
-    
+
     if (type === "checkbox") {
       const target = e.target as HTMLInputElement;
       setFormData(prev => ({
@@ -42,8 +42,15 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
     setSaving(true);
 
     try {
+      const patientId = localStorage.getItem("userId");
+      if (!patientId) {
+        alert("Please log in to submit the questionnaire.");
+        return;
+      }
+
       await addDoc(collection(db, "healthQuestionnaires"), {
         ...formData,
+        patientId,
         timestamp: serverTimestamp(),
       });
 
@@ -61,21 +68,21 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border-2 border-blue-100 p-8">
+    <div className="bg-[var(--card)] rounded-xl shadow-sm border border-[var(--border)] p-8">
       <div className="flex items-center gap-3 mb-6">
-        <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl">
+        <div className="p-3 bg-[var(--primary)] rounded-xl">
           <ClipboardList className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Health Questionnaire</h2>
-          <p className="text-sm text-slate-600">Complete your medical history</p>
+          <h2 className="text-xl font-semibold text-[var(--foreground)]">Health Questionnaire</h2>
+          <p className="text-sm text-[var(--muted-foreground)]">Complete your medical history</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Medical Conditions */}
-        <div className="border-2 border-blue-100 rounded-xl p-5 bg-blue-50/50">
-          <h3 className="font-semibold text-slate-900 mb-4">Current Medical Conditions</h3>
+        <div className="border border-[var(--border)] rounded-xl p-5 bg-[var(--muted)]">
+          <h3 className="font-medium text-[var(--foreground)] mb-4">Current Medical Conditions</h3>
           <div className="space-y-3">
             {[
               { name: "has_hypertension", label: "Hypertension (High Blood Pressure)" },
@@ -89,9 +96,9 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
                   name={condition.name}
                   checked={formData[condition.name as keyof typeof formData] as boolean}
                   onChange={handleChange}
-                  className="w-5 h-5 text-blue-600 rounded border-2 border-slate-300 focus:ring-2 focus:ring-blue-500"
+                  className="w-5 h-5 text-[var(--primary)] rounded border-2 border-slate-300 focus:ring-2 focus:ring-[var(--ring)]"
                 />
-                <span className="text-slate-700">{condition.label}</span>
+                <span className="text-[var(--foreground)]">{condition.label}</span>
               </label>
             ))}
           </div>
@@ -100,14 +107,14 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
         {/* Lifestyle */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
               Smoking Status
             </label>
             <select
               name="smoking_status"
               value={formData.smoking_status}
               onChange={handleChange}
-              className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
             >
               <option value="never">Never</option>
               <option value="former">Former Smoker</option>
@@ -116,14 +123,14 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
               Exercise Frequency
             </label>
             <select
               name="exercise_frequency"
               value={formData.exercise_frequency}
               onChange={handleChange}
-              className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition bg-[var(--input-background)]"
             >
               <option value="none">None</option>
               <option value="1-2">1-2 times/week</option>
@@ -141,22 +148,22 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
               name="family_history"
               checked={formData.family_history}
               onChange={handleChange}
-              className="w-5 h-5 text-blue-600 rounded border-2 border-slate-300 focus:ring-2 focus:ring-blue-500"
+              className="w-5 h-5 text-[var(--primary)] rounded border-2 border-slate-300 focus:ring-2 focus:ring-[var(--ring)]"
             />
-            <span className="text-slate-700 font-medium">Family history of cardiovascular disease</span>
+            <span className="text-[var(--foreground)] font-medium">Family history of cardiovascular disease</span>
           </label>
         </div>
 
         {/* Current Medications */}
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
+          <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
             Current Medications
           </label>
           <textarea
             name="current_medications"
             value={formData.current_medications}
             onChange={handleChange}
-            className="w-full p-3 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition resize-none"
+            className="w-full p-3 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] transition resize-none bg-[var(--input-background)]"
             placeholder="List any medications you're currently taking..."
             rows={4}
           />
@@ -165,7 +172,7 @@ export default function QuestionnaireForm({ onSuccess }: QuestionnaireFormProps)
         <button
           type="submit"
           disabled={saving}
-          className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+          className="w-full py-3 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 transition shadow-sm flex items-center justify-center gap-2"
         >
           {saving ? (
             <>

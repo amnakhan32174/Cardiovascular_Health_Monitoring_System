@@ -1,111 +1,97 @@
 // services/mlService.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Two ML services:
+//   1. BP prediction  (port 5001) — CNN-BiLSTM on PPG+ECG arrays
+//   2. PCG prediction (port 5002) — Conv1D on WAV heart sound files
+//
+// PCG NOTE: The PCG model was trained on WAV audio files processed through
+// MFCC feature extraction. It cannot accept raw ECG/PPG arrays directly.
+// For now, predictions use WAV files from the data/ folder.
+// When you add a real microphone to your hardware, switch to /predict-signal.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const axios = require("axios");
+const path  = require("path");
+const fs    = require("fs");
 
-const ML_MODEL_URL = process.env.ML_MODEL_URL;
+const ML_MODEL_URL  = process.env.ML_MODEL_URL;   // http://localhost:5001/predict
+const PCG_MODEL_URL = process.env.PCG_MODEL_URL;  // http://localhost:5002
 
-/**
- * Preprocesses sensor data to match training format
- */
-function preprocessData(sensorData) {
-  // Your model was trained on windows of 125 samples
-  const REQUIRED_LENGTH = 125;
-
-  let ppg = sensorData.ppg || [];
-  let ecg = sensorData.ecg || [];
-
-  // Pad or truncate to required length
-  ppg = padOrTruncate(ppg, REQUIRED_LENGTH);
-  ecg = padOrTruncate(ecg, REQUIRED_LENGTH);
-
-  // Normalize PPG (Min-Max normalization like in training)
-  ppg = normalizeMinMax(ppg);
-
-  // Normalize ECG (Z-score normalization like in training)
-  ecg = normalizeZScore(ecg);
-
-  return { ppg, ecg };
+// ── Helper ────────────────────────────────────────────────────────────────────
+function isPcgUrlConfigured() {
+  return (
+    PCG_MODEL_URL &&
+    typeof PCG_MODEL_URL === "string" &&
+    PCG_MODEL_URL.startsWith("http")
+  );
 }
 
+function isBpUrlConfigured() {
+  return (
+    ML_MODEL_URL &&
+    typeof ML_MODEL_URL === "string" &&
+    ML_MODEL_URL.startsWith("http")
+  );
+}
+
+// Strip any trailing /predict so we can append the right path ourselves
+function pcgBaseUrl() {
+  return PCG_MODEL_URL.replace(/\/predict$/, "");
+}
+
+// ── BP Prediction ─────────────────────────────────────────────────────────────
 function padOrTruncate(arr, targetLength) {
-  if (arr.length === 0) {
-    // Return array of zeros if empty
-    return new Array(targetLength).fill(0);
-  }
-
-  if (arr.length > targetLength) {
-    // Truncate
-    return arr.slice(0, targetLength);
-  }
-
-  if (arr.length < targetLength) {
-    // Pad with last value or zeros
-    const padValue = arr[arr.length - 1] || 0;
-    return [...arr, ...new Array(targetLength - arr.length).fill(padValue)];
-  }
-
-  return arr;
+  if (arr.length === 0) return new Array(targetLength).fill(0);
+  if (arr.length > targetLength) return arr.slice(0, targetLength);
+  const padValue = arr[arr.length - 1] || 0;
+  return [...arr, ...new Array(targetLength - arr.length).fill(padValue)];
 }
 
 function normalizeMinMax(arr) {
-  const min = Math.min(...arr);
-  const max = Math.max(...arr);
+  const min   = Math.min(...arr);
+  const max   = Math.max(...arr);
   const range = max - min;
-
   if (range === 0) return arr.map(() => 0);
-
   return arr.map(val => (val - min) / range);
 }
 
 function normalizeZScore(arr) {
-  const mean = arr.reduce((sum, val) => sum + val, 0) / arr.length;
-  const variance = arr.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / arr.length;
-  const std = Math.sqrt(variance) + 1e-8; // Avoid division by zero
-
-  // Light scaling like in training (divide by 2)
+  const mean     = arr.reduce((s, v) => s + v, 0) / arr.length;
+  const variance = arr.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / arr.length;
+  const std      = Math.sqrt(variance) + 1e-8;
   return arr.map(val => (val - mean) / (std * 2));
 }
 
+function preprocessBpData(sensorData) {
+  const REQUIRED_LENGTH = 125;
+  let ppg = padOrTruncate(sensorData.ppg || [], REQUIRED_LENGTH);
+  let ecg = padOrTruncate(sensorData.ecg || [], REQUIRED_LENGTH);
+  ppg = normalizeMinMax(ppg);
+  ecg = normalizeZScore(ecg);
+  return { ppg, ecg };
+}
+
 async function predictBP(sensorData) {
-  if (!ML_MODEL_URL || typeof ML_MODEL_URL !== "string" || !ML_MODEL_URL.startsWith("http")) {
-    console.log("⚠️ ML_MODEL_URL not configured, skipping BP prediction");
+  if (!isBpUrlConfigured()) {
+    console.log("⚠️  ML_MODEL_URL not configured, skipping BP prediction");
     return null;
   }
 
   try {
-    // Preprocess data
-    const { ppg, ecg } = preprocessData(sensorData);
-
-    // Payload for FastAPI
-    const payload = {
-      ppg: ppg,
-      ecg: ecg
-    };
-
-    console.log("📤 Sending to ML model:", {
-      url: ML_MODEL_URL,
-      ppg_length: ppg.length,
-      ecg_length: ecg.length,
-      ppg_sample: ppg.slice(0, 5),
-      ecg_sample: ecg.slice(0, 5)
-    });
+    const { ppg, ecg } = preprocessBpData(sensorData);
 
     const response = await axios.post(
       ML_MODEL_URL,
-      payload,
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: 10000
-      }
+      { ppg, ecg },
+      { headers: { "Content-Type": "application/json" }, timeout: 10000 }
     );
 
-    console.log("✅ ML model response:", response.data);
-
+    console.log("✅ BP model response:", response.data);
     return {
       mean_bp: response.data.mean_bp || response.data.bp || response.data.prediction
     };
   } catch (error) {
-    if (error.code === 'ECONNREFUSED') {
+    if (error.code === "ECONNREFUSED") {
       console.error("❌ BP prediction failed: ML model not running on", ML_MODEL_URL);
     } else {
       console.error("❌ BP prediction failed:", error.message);
@@ -114,6 +100,141 @@ async function predictBP(sensorData) {
   }
 }
 
+// ── PCG Prediction ────────────────────────────────────────────────────────────
+//
+// Strategy:
+//   - Pick a WAV file from the data/ folder that matches the current session
+//     (for now: random file, or the most recently used one).
+//   - In the future, when you have a real microphone, call /predict-signal
+//     with the actual PCG audio buffer instead.
+//
+// The PCG model classifies heart sounds into:
+//   AS  = Aortic Stenosis
+//   MR  = Mitral Regurgitation
+//   MS  = Mitral Stenosis
+//   MVP = Mitral Valve Prolapse
+//   N   = Normal
+
+// Track which WAV files are available
+let availableWavFiles = null;
+
+function getAvailableWavFiles() {
+  if (availableWavFiles !== null) return availableWavFiles;
+
+  const dataDir = path.join(__dirname, "..", "data");
+  if (!fs.existsSync(dataDir)) {
+    console.warn("⚠️  data/ folder not found for PCG prediction");
+    availableWavFiles = [];
+    return availableWavFiles;
+  }
+
+  availableWavFiles = fs
+    .readdirSync(dataDir)
+    .filter(f => f.toLowerCase().endsWith(".wav"))
+    .sort();
+
+  console.log(`📁 Found ${availableWavFiles.length} WAV files for PCG prediction`);
+  return availableWavFiles;
+}
+
+// Keep track of which file index to use (cycles through all files)
+let wavFileIndex = 0;
+
+async function predictHeartSoundType(wavFilename) {
+  /**
+   * Predict heart sound type from a specific WAV file.
+   * @param {string} wavFilename - filename like "156_AS.wav"
+   * @returns {Object|null} prediction result
+   */
+  if (!isPcgUrlConfigured()) {
+    console.log("⚠️  PCG_MODEL_URL not configured, skipping PCG prediction");
+    return null;
+  }
+
+  const url = `${pcgBaseUrl()}/predict`;
+
+  try {
+    console.log(`📤 PCG predict: ${wavFilename} → ${url}`);
+
+    const response = await axios.post(
+      url,
+      { filename: wavFilename },
+      { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+    );
+
+    const data = response.data;
+
+    if (data && data.heart_sound_type) {
+      console.log(
+        `💓 PCG result: ${data.heart_sound_type} ` +
+        `(confidence=${(data.confidence * 100).toFixed(1)}%)`
+      );
+      return {
+        heart_rate_type:            data.heart_sound_type,   // kept as heart_rate_type for frontend compat
+        heart_sound_type:           data.heart_sound_type,
+        confidence:                 data.confidence || 0,
+        class_index:                data.class_index ?? 0,
+        all_probabilities:          data.details?.all_probabilities || {},
+        source_file:                wavFilename,
+      };
+    }
+    return null;
+
+  } catch (error) {
+    if (error.code === "ECONNREFUSED") {
+      console.error("❌ PCG prediction failed: service not running on", PCG_MODEL_URL);
+    } else {
+      console.error("❌ PCG prediction failed:", error.message);
+    }
+    return null;
+  }
+}
+
+async function predictHeartRateType(sensorData) {
+  /**
+   * Called from server.js for each incoming sensor reading.
+   *
+   * Current mode: uses WAV files from data/ folder (demo/test mode).
+   * Future mode:  when sensorData.pcg contains real microphone audio,
+   *               call /predict-signal with actual PCG samples.
+   *
+   * NOTE: We do NOT use sensorData.ecg as PCG input — ECG is an electrical
+   *       signal; PCG is acoustic. They are completely different and the model
+   *       was trained only on acoustic heart sounds.
+   */
+
+  if (!isPcgUrlConfigured()) return null;
+
+  // ── Future: real PCG microphone data ──────────────────────────────────────
+  // When your hardware sends actual PCG audio (microphone/digital stethoscope):
+  //
+  //   if (sensorData.pcg && sensorData.pcg.length >= 500) {
+  //     const url = `${pcgBaseUrl()}/predict-signal`;
+  //     const response = await axios.post(url, {
+  //       pcg: sensorData.pcg,
+  //       sample_rate: sensorData.pcg_sample_rate || 2000
+  //     }, { timeout: 15000 });
+  //     return { heart_rate_type: response.data.heart_sound_type, ... };
+  //   }
+
+  // ── Current: WAV file mode ─────────────────────────────────────────────────
+  const files = getAvailableWavFiles();
+  if (files.length === 0) {
+    console.warn("⚠️  No WAV files available for PCG prediction");
+    return null;
+  }
+
+  // Cycle through files so each reading gets a prediction from a different file
+  const filename = files[wavFileIndex % files.length];
+  wavFileIndex++;
+
+  return await predictHeartSoundType(filename);
+}
+
+// ── Exports ───────────────────────────────────────────────────────────────────
 module.exports = {
-  predictBP
+  predictBP,
+  predictHeartRateType,
+  predictHeartSoundType,   // export for direct use in new route
+  getAvailableWavFiles,
 };

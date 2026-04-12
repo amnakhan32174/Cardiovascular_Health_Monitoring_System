@@ -60,6 +60,8 @@ async function saveReading(reading) {
     dbp: validateNumber(reading.dbp),
     mean_bp: validateNumber(reading.mean_bp),
     blood_sugar: validateNumber(reading.blood_sugar),
+    heart_rate_type: reading.heart_rate_type || null,
+    heart_rate_type_confidence: validateNumber(reading.heart_rate_type_confidence),
     
     // Store arrays only if they have meaningful data
     ecg: Array.isArray(reading.ecg) && reading.ecg.length > 0 ? reading.ecg : null,

@@ -389,7 +389,7 @@ export default function SignUp() {
 
         {/* Terms and Conditions Checkbox */}
         <div className="mb-4">
-          <          label className={`flex items-start gap-2 cursor-pointer p-3 rounded-lg border transition ${
+          <label className={`flex items-start gap-2 cursor-pointer p-3 rounded-lg border transition ${
             validationErrors.terms ? 'border-red-500 bg-red-50' : 'border-[var(--border)] hover:border-[var(--primary)]'
           }`}>
             <input

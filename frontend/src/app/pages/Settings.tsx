@@ -17,19 +17,36 @@ export default function Settings() {
   });
   const [saved, setSaved] = useState(false);
 
+  const applyTheme = (theme: string) => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  };
+
   useEffect(() => {
     const stored = localStorage.getItem("appSettings");
     if (stored) {
-      try { setSettings(JSON.parse(stored)); } catch {}
+      try {
+        const parsed = JSON.parse(stored);
+        setSettings(parsed);
+        applyTheme(parsed.theme || "light");
+      } catch {}
     }
   }, []);
 
   const handleChange = (key: string, value: any) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
+    setSettings(prev => {
+      const next = { ...prev, [key]: value };
+      if (key === "theme") applyTheme(value);
+      return next;
+    });
   };
 
   const handleSave = () => {
     localStorage.setItem("appSettings", JSON.stringify(settings));
+    applyTheme(settings.theme);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };

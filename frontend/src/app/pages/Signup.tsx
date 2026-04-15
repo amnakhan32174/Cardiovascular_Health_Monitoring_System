@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router";
 import { Heart, Stethoscope, User } from "lucide-react";
 import { auth, db } from "../../firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { collection, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 
 interface ValidationErrors {
   email?: string;
@@ -12,7 +12,6 @@ interface ValidationErrors {
   name?: string;
   age?: string;
   sex?: string;
-  doctor?: string;
   license?: string;
   specialization?: string;
   terms?: string;
@@ -28,83 +27,50 @@ export default function SignUp() {
   const [role, setRole] = useState("patient");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [specialization, setSpecialization] = useState("");
-  const [assignedDoctorId, setAssignedDoctorId] = useState("");
-  const [doctors, setDoctors] = useState<any[]>([]);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState("");
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const loadDoctors = async () => {
-      try {
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("role", "==", "doctor"));
-        const snapshot = await getDocs(q);
-        const doctorList: any[] = [];
-        snapshot.forEach((docSnap) => {
-          doctorList.push({ id: docSnap.id, ...docSnap.data() });
-        });
-        setDoctors(doctorList);
-      } catch (err) {
-        console.error("Error loading doctors:", err);
-      }
-    };
-
-    loadDoctors();
-  }, []);
-
-  // Validate email format
   function validateEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
-  // Validate form inputs
   function validateForm(): boolean {
     const errors: ValidationErrors = {};
 
-    // Email validation
     if (!email) {
       errors.email = "Email is required";
     } else if (!validateEmail(email)) {
       errors.email = "Invalid email address";
     }
 
-    // Password validation
     if (!password) {
       errors.password = "Password is required";
     } else if (password.length < 6) {
       errors.password = "Password must be at least 6 characters";
     }
 
-    // Confirm password validation
     if (!confirmPassword) {
       errors.confirmPassword = "Please confirm your password";
     } else if (password !== confirmPassword) {
       errors.confirmPassword = "Passwords do not match";
     }
 
-    // Name validation
     if (!name || name.trim().length === 0) {
       errors.name = "Full name is required";
     }
 
-    // Terms validation
     if (!agreedToTerms) {
       errors.terms = "You must agree to the Terms & Conditions";
     }
 
-    // Role-specific validation
     if (role === "patient") {
       if (!age || Number(age) < 1 || Number(age) > 150) {
         errors.age = "Please enter a valid age";
       }
       if (!sex) {
         errors.sex = "Please select your sex";
-      }
-      if (!assignedDoctorId) {
-        errors.doctor = "Please select a doctor";
       }
     } else if (role === "doctor") {
       if (!licenseNumber || licenseNumber.trim().length === 0) {
@@ -121,19 +87,15 @@ export default function SignUp() {
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
-    
-    // Clear previous errors
     setError("");
     setValidationErrors({});
 
-    // Validate form
     if (!validateForm()) {
       setError("Please fix the errors below");
       return;
     }
 
     try {
-
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
@@ -141,13 +103,13 @@ export default function SignUp() {
         name,
         email,
         role,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       };
 
       if (role === "patient") {
         userData.age = age;
         userData.sex = sex;
-        userData.assignedDoctorId = assignedDoctorId;
+        userData.assignedDoctorId = null; // admin assigns this later
       } else if (role === "doctor") {
         userData.licenseNumber = licenseNumber;
         userData.specialization = specialization;
@@ -156,11 +118,9 @@ export default function SignUp() {
       localStorage.setItem("userRole", role);
       localStorage.setItem("userId", user.uid);
       localStorage.setItem("userData", JSON.stringify(userData));
-      console.log("Saved to localStorage - Role:", role, "UserID:", user.uid);
-      
+
       try {
         await setDoc(doc(db, "users", user.uid), userData);
-        console.log("Saved to Firestore successfully");
       } catch (firestoreError) {
         console.warn("Firestore save error (may be offline):", firestoreError);
       }
@@ -168,10 +128,8 @@ export default function SignUp() {
       alert(`Account created successfully! You are registered as a ${role}.`);
       navigate("/login");
     } catch (err: any) {
-      console.error("SignUp error:", err);
-      
       let errorMessage = "Failed to create account. Please try again.";
-      
+
       if (err.code === "auth/email-already-in-use") {
         errorMessage = "This email is already registered. Please login instead.";
       } else if (err.code === "auth/invalid-email") {
@@ -183,7 +141,7 @@ export default function SignUp() {
       } else if (err.message) {
         errorMessage = err.message;
       }
-      
+
       setError(errorMessage);
     }
   }
@@ -199,7 +157,7 @@ export default function SignUp() {
             <Heart className="w-10 h-10 text-white" fill="white" />
           </div>
         </div>
-        
+
         <h1 className="text-3xl font-bold mb-2 text-center text-[var(--foreground)]">
           Create Account
         </h1>
@@ -262,6 +220,9 @@ export default function SignUp() {
               onChange={(e) => setAge(e.target.value)}
               required
             />
+            {validationErrors.age && (
+              <p className="text-red-600 text-xs -mt-2 mb-2">{validationErrors.age}</p>
+            )}
 
             <select
               className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
@@ -274,28 +235,15 @@ export default function SignUp() {
               <option value="Male">Male</option>
               <option value="Other">Other</option>
             </select>
-
-            <select
-              className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
-              value={assignedDoctorId}
-              onChange={(e) => setAssignedDoctorId(e.target.value)}
-              required
-              disabled={doctors.length === 0}
-            >
-              <option value="">
-                {doctors.length === 0 ? "No doctors available" : "Select Assigned Doctor"}
-              </option>
-              {doctors.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
-                  {doctor.name || doctor.email || doctor.id}
-                </option>
-              ))}
-            </select>
-            {doctors.length === 0 && (
-              <p className="text-xs text-amber-600 mb-2">
-                No doctors found. Ask an admin to assign a doctor or create a doctor account first.
-              </p>
+            {validationErrors.sex && (
+              <p className="text-red-600 text-xs -mt-2 mb-2">{validationErrors.sex}</p>
             )}
+
+            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs text-blue-700">
+                A doctor will be assigned to you by the admin after registration.
+              </p>
+            </div>
           </>
         ) : (
           <>
@@ -306,6 +254,9 @@ export default function SignUp() {
               onChange={(e) => setLicenseNumber(e.target.value)}
               required
             />
+            {validationErrors.license && (
+              <p className="text-red-600 text-xs -mt-2 mb-2">{validationErrors.license}</p>
+            )}
 
             <select
               className="w-full p-3 border border-[var(--border)] rounded-lg mb-3 focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--primary)] bg-[var(--input-background)]"
@@ -320,22 +271,23 @@ export default function SignUp() {
               <option value="Family Medicine">Family Medicine</option>
               <option value="Other">Other</option>
             </select>
+            {validationErrors.specialization && (
+              <p className="text-red-600 text-xs -mt-2 mb-2">{validationErrors.specialization}</p>
+            )}
           </>
         )}
 
         <div className="mb-3">
           <input
             className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-[var(--ring)] bg-[var(--input-background)] transition ${
-              validationErrors.email ? 'border-red-500 bg-red-50' : 'border-[var(--border)]'
+              validationErrors.email ? "border-red-500 bg-red-50" : "border-[var(--border)]"
             }`}
             type="email"
             placeholder="Email Address"
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
-              if (validationErrors.email) {
-                setValidationErrors(prev => ({...prev, email: undefined}));
-              }
+              if (validationErrors.email) setValidationErrors(prev => ({ ...prev, email: undefined }));
             }}
             required
           />
@@ -347,16 +299,14 @@ export default function SignUp() {
         <div className="mb-3">
           <input
             className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-[var(--ring)] bg-[var(--input-background)] transition ${
-              validationErrors.password ? 'border-red-500 bg-red-50' : 'border-[var(--border)]'
+              validationErrors.password ? "border-red-500 bg-red-50" : "border-[var(--border)]"
             }`}
             type="password"
             placeholder="Create Password (min 6 characters)"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
-              if (validationErrors.password) {
-                setValidationErrors(prev => ({...prev, password: undefined}));
-              }
+              if (validationErrors.password) setValidationErrors(prev => ({ ...prev, password: undefined }));
             }}
             required
             minLength={6}
@@ -369,16 +319,14 @@ export default function SignUp() {
         <div className="mb-4">
           <input
             className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-[var(--ring)] bg-[var(--input-background)] transition ${
-              validationErrors.confirmPassword ? 'border-red-500 bg-red-50' : 'border-[var(--border)]'
+              validationErrors.confirmPassword ? "border-red-500 bg-red-50" : "border-[var(--border)]"
             }`}
             type="password"
             placeholder="Confirm Password"
             value={confirmPassword}
             onChange={(e) => {
               setConfirmPassword(e.target.value);
-              if (validationErrors.confirmPassword) {
-                setValidationErrors(prev => ({...prev, confirmPassword: undefined}));
-              }
+              if (validationErrors.confirmPassword) setValidationErrors(prev => ({ ...prev, confirmPassword: undefined }));
             }}
             required
           />
@@ -387,32 +335,26 @@ export default function SignUp() {
           )}
         </div>
 
-        {/* Terms and Conditions Checkbox */}
+        {/* Terms and Conditions */}
         <div className="mb-4">
           <label className={`flex items-start gap-2 cursor-pointer p-3 rounded-lg border transition ${
-            validationErrors.terms ? 'border-red-500 bg-red-50' : 'border-[var(--border)] hover:border-[var(--primary)]'
+            validationErrors.terms ? "border-red-500 bg-red-50" : "border-[var(--border)] hover:border-[var(--primary)]"
           }`}>
             <input
               type="checkbox"
               checked={agreedToTerms}
               onChange={(e) => {
                 setAgreedToTerms(e.target.checked);
-                if (validationErrors.terms) {
-                  setValidationErrors(prev => ({...prev, terms: undefined}));
-                }
+                if (validationErrors.terms) setValidationErrors(prev => ({ ...prev, terms: undefined }));
               }}
               className="mt-1 w-4 h-4 text-[var(--primary)] border-slate-300 rounded focus:ring-[var(--ring)]"
               required
             />
             <span className="text-sm text-[var(--foreground)]">
               I agree to the{" "}
-              <span className="text-[var(--primary)] font-semibold hover:underline">
-                Terms & Conditions
-              </span>{" "}
-              and{" "}
-              <span className="text-[var(--primary)] font-semibold hover:underline">
-                Privacy Policy
-              </span>
+              <span className="text-[var(--primary)] font-semibold hover:underline">Terms & Conditions</span>
+              {" "}and{" "}
+              <span className="text-[var(--primary)] font-semibold hover:underline">Privacy Policy</span>
             </span>
           </label>
           {validationErrors.terms && (

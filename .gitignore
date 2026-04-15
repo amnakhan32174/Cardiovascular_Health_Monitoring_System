@@ -11,16 +11,12 @@ ServiceAccountKey.json
 # Claude memory
 .claude/
 
-# Documentation files
-IMPLEMENTATION_COMPLETE.md
-SYSTEM_AUDIT_REPORT.md
-TECHNICAL_VIVA_EXPLANATION.md
-backend/API_DOCUMENTATION.md
-backend/IMPLEMENTATION_SUMMARY.md
-backend/START_SERVER.md
-backend/PCG_SETUP.md
-backend/ECG_MODEL_SETUP.md
-backend/QUICK_START.md
+# Documentation / text files
+*.md
+*.txt
+
+# Large ML model weights (too large for GitHub — store separately)
+*.h5
 
 # OS
 .DS_Store

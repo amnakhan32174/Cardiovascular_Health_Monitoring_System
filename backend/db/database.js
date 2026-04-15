@@ -24,15 +24,16 @@ const db = new Low(adapter, {});
 async function initDatabase() {
   await db.read();
   
-  // Set default data structure if database is empty
-  db.data = db.data || {
-    vitals: [],
-    metadata: {
+  // Ensure required keys exist even if the JSON file was empty or partially written
+  if (!db.data || typeof db.data !== "object") db.data = {};
+  if (!Array.isArray(db.data.vitals)) db.data.vitals = [];
+  if (!db.data.metadata) {
+    db.data.metadata = {
       created: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
-      totalReadings: 0
-    }
-  };
+      totalReadings: 0,
+    };
+  }
   
   await db.write();
   console.log('✅ Database initialized at:', dbPath);
@@ -71,7 +72,8 @@ async function saveReading(reading) {
     savedAt: new Date().toISOString()
   };
   
-  // Add to vitals array
+  // Add to vitals array (guard against missing array if db file was corrupted / empty)
+  if (!Array.isArray(db.data.vitals)) db.data.vitals = [];
   db.data.vitals.push(vitalRecord);
   
   // Update metadata

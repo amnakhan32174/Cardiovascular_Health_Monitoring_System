@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { Heart } from "lucide-react";
 import { auth, db } from "../../firebase";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDocFromServer, collection, query, where, getDocs } from "firebase/firestore";
 
 interface LoginProps {
   onLogin: () => void;
@@ -13,6 +13,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const navigate = useNavigate();
 
   async function handleLogin(e: React.FormEvent) {
@@ -21,54 +22,55 @@ export default function Login({ onLogin }: LoginProps) {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
+      // Clear any stale role data from a previous user's session before lookup
+      localStorage.removeItem("userRole");
+      localStorage.removeItem("userData");
+
       let role = null;
-      const savedRole = localStorage.getItem("userRole");
-      const savedUserData = localStorage.getItem("userData");
-      
-      if (savedRole) {
-        role = savedRole;
-        console.log("Using role from localStorage:", role);
+
+      // Force fetch from server so manually-set roles (e.g. admin) are always picked up.
+      // First try the canonical path: users/{uid}
+      let userData: any = null;
+      const uidDoc = await getDocFromServer(doc(db, "users", user.uid));
+      if (uidDoc.exists()) {
+        userData = uidDoc.data();
+      } else {
+        // Fallback: document was created manually with an auto-generated ID —
+        // search by email instead
+        const snap = await getDocs(
+          query(collection(db, "users"), where("email", "==", user.email))
+        );
+        if (!snap.empty) userData = snap.docs[0].data();
       }
-      
-      try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          if (userData?.role) {
-            role = userData.role;
-            console.log("Using role from Firestore:", role);
-            localStorage.setItem("userRole", role);
-            localStorage.setItem("userData", JSON.stringify(userData));
-          }
-        } else {
-          console.log("User document doesn't exist in Firestore, using localStorage role");
-        }
-      } catch (firestoreError) {
-        console.warn("Firestore error, using localStorage fallback:", firestoreError);
-      }
-      
-      if (!role && savedUserData) {
-        try {
-          const parsedData = JSON.parse(savedUserData);
-          if (parsedData?.role) {
-            role = parsedData.role;
-            console.log("Using role from saved userData:", role);
-          }
-        } catch (e) {
-          console.warn("Error parsing saved userData:", e);
-        }
-      }
-      
-      if (!role) {
-        console.warn("No role found, defaulting to patient");
+
+      if (userData?.role) {
+        // Normalize to lowercase so "Admin" / "ADMIN" / "admin" all work
+        role = (userData.role as string).toLowerCase().trim();
+        localStorage.setItem("userData", JSON.stringify({ ...userData, role }));
+      } else if (userData) {
+        setError("Your account has no role assigned. Contact an admin.");
+        return;
+      } else {
+        // No document at all — treat as patient
         role = "patient";
       }
+
+      console.log("Role fetched from Firestore:", role);
+      if (!role) role = "patient";
       
       console.log("Final role determined:", role);
       
-      localStorage.setItem("isLoggedIn", "true");
+      // Role and userId always go to localStorage so all page guards (AdminDashboard, etc.) can read them.
+      // Only "isLoggedIn" uses sessionStorage when "Remember me" is unchecked —
+      // that flag clears automatically when the browser closes.
       localStorage.setItem("userRole", role);
       localStorage.setItem("userId", user.uid);
+      if (rememberMe) {
+        localStorage.setItem("isLoggedIn", "true");
+      } else {
+        sessionStorage.setItem("isLoggedIn", "true");
+        localStorage.removeItem("isLoggedIn"); // ensure old "remember me" flag is gone
+      }
       
       onLogin();
       
@@ -144,6 +146,19 @@ export default function Login({ onLogin }: LoginProps) {
           required
         />
         
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            id="rememberMe"
+            type="checkbox"
+            checked={rememberMe}
+            onChange={e => setRememberMe(e.target.checked)}
+            className="w-4 h-4 accent-[var(--primary)] cursor-pointer"
+          />
+          <label htmlFor="rememberMe" className="text-sm text-[var(--muted-foreground)] cursor-pointer select-none">
+            Remember me
+          </label>
+        </div>
+
         <button className="w-full py-3 bg-[var(--primary)] text-white rounded-lg font-medium hover:bg-orange-600 transition shadow-sm">
           Sign In
         </button>

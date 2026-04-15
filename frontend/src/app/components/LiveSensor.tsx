@@ -1,7 +1,7 @@
 // src/app/components/LiveSensor.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { Activity, Heart, Droplets, Wind, Stethoscope, Link } from "lucide-react";
+import { Activity, Heart, Droplets, Wind, Stethoscope, Link, TrendingUp } from "lucide-react";
 
 interface LiveSensorProps {
   deviceId?: string;
@@ -16,11 +16,22 @@ interface Vitals {
   ecg: number[]; ppg: number[]; timestamp: string | null;
 }
 
+interface PPGBPResult {
+  sbp: number; dbp: number;
+  sbp_std: number; dbp_std: number;
+  n_segments: number; duration_sec: number;
+  model_name: string;
+}
+
 const EMPTY: Vitals = {
   hr: null, spo2: null, sbp: null, dbp: null, mean_bp: null,
   blood_sugar: null, heart_rate_type: null, heart_rate_type_confidence: null,
   heart_sound_all_probs: null, ecg: [], ppg: [], timestamp: null,
 };
+
+// Need 30s at ~8.3 Hz native ESP rate = ~250 samples
+const PPG_REQUIRED_SAMPLES = 250;
+const PPG_SERVER_URL = "http://localhost:5003";
 
 const HS: Record<string, { full: string; color: string; bg: string; severity: string }> = {
   N:   { full: "Normal",                color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200",  severity: "Normal"   },
@@ -42,6 +53,13 @@ function spo2Color(s: number | null) {
   if (s < 90) return "text-red-600";
   if (s < 95) return "text-amber-600";
   return "text-emerald-600";
+}
+
+function bpCategory(sbp: number, dbp: number) {
+  if (sbp < 120 && dbp < 80)  return { label: "Normal",          color: "text-emerald-700", bg: "bg-emerald-100" };
+  if (sbp < 130 && dbp < 80)  return { label: "Elevated",        color: "text-amber-700",   bg: "bg-amber-100"   };
+  if (sbp < 140 || dbp < 90)  return { label: "High Stage 1",    color: "text-orange-700",  bg: "bg-orange-100"  };
+  return                              { label: "High Stage 2",    color: "text-red-700",     bg: "bg-red-100"     };
 }
 
 function ECGWaveform({ samples }: { samples: number[] }) {
@@ -84,7 +102,46 @@ export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps
   const [isConnected,  setIsConnected]  = useState(false);
   const [isRegistered, setIsRegistered] = useState(false);
   const [lastUpdated,  setLastUpdated]  = useState<string | null>(null);
-  const socketRef = useRef<Socket | null>(null);
+
+  // PPG-only model state
+  const [ppgBP,         setPpgBP]         = useState<PPGBPResult | null>(null);
+  const [ppgLoading,    setPpgLoading]    = useState(false);
+  const [ppgError,      setPpgError]      = useState<string | null>(null);
+  const [ppgSampleCount, setPpgSampleCount] = useState(0);
+
+  // Refs for PPG buffering (avoid stale closures, no re-renders per sample)
+  const ppgBufferRef    = useRef<number[]>([]);
+  const isPredictingRef = useRef(false);
+  const socketRef       = useRef<Socket | null>(null);
+
+  // Run prediction against the PPG-only model server
+  const runPpgPrediction = async (samples: number[]) => {
+    if (isPredictingRef.current) return;
+    isPredictingRef.current = true;
+    setPpgLoading(true);
+    setPpgError(null);
+    try {
+      const res = await fetch(`${PPG_SERVER_URL}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ppg: samples,
+          sample_rate: 8.3,   // ESP native rate — server resamples to 100 Hz
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || "Prediction failed");
+      }
+      const data = await res.json();
+      setPpgBP(data);
+    } catch (e: any) {
+      setPpgError(e.message || "PPG server unreachable");
+    } finally {
+      setPpgLoading(false);
+      isPredictingRef.current = false;
+    }
+  };
 
   useEffect(() => {
     const url       = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
@@ -96,15 +153,18 @@ export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps
       setIsConnected(true);
       if (patientId) socket.emit("register_patient", { patientId });
     });
-
     socket.on("patient_registered", (d: any) => { if (d.ok) setIsRegistered(true); });
     socket.on("disconnect", () => { setIsConnected(false); setIsRegistered(false); });
 
     const handle = (data: any) => {
       if (deviceId && data.deviceId && data.deviceId !== deviceId) return;
+
       const v: Vitals = {
-        hr: data.hr ?? null, spo2: data.spo2 ?? null,
-        sbp: data.sbp ?? null, dbp: data.dbp ?? null, mean_bp: data.mean_bp ?? null,
+        hr:   data.hr   ?? null,
+        spo2: data.spo2 ?? null,
+        sbp:  data.sbp  ?? null,
+        dbp:  data.dbp  ?? null,
+        mean_bp: data.mean_bp ?? null,
         blood_sugar: data.blood_sugar ?? null,
         heart_rate_type: data.heart_rate_type ?? null,
         heart_rate_type_confidence: data.heart_rate_type_confidence ?? null,
@@ -113,18 +173,43 @@ export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps
         ppg: Array.isArray(data.ppg) ? data.ppg : [],
         timestamp: data.timestamp ?? new Date().toISOString(),
       };
+
       setVitals(v);
       setLastUpdated(new Date().toLocaleTimeString());
       if (onVitalsUpdate) onVitalsUpdate(v);
+
+      // ── Buffer PPG samples for the PPG-only model ──────────────────────────
+      if (v.ppg.length > 0) {
+        ppgBufferRef.current.push(...v.ppg);
+
+        // Keep only the latest 600 samples (~72s) to bound memory
+        if (ppgBufferRef.current.length > 600) {
+          ppgBufferRef.current = ppgBufferRef.current.slice(-600);
+        }
+
+        const count = ppgBufferRef.current.length;
+        setPpgSampleCount(count);
+
+        // Once we have enough samples, run prediction
+        if (count >= PPG_REQUIRED_SAMPLES && !isPredictingRef.current) {
+          runPpgPrediction([...ppgBufferRef.current]);
+        }
+      }
     };
 
     socket.on("new_reading", handle);
     socket.on("newReading",  handle);
-    return () => { socket.off("new_reading", handle); socket.off("newReading", handle); socket.disconnect(); };
+    return () => {
+      socket.off("new_reading", handle);
+      socket.off("newReading",  handle);
+      socket.disconnect();
+    };
   }, [deviceId]);
 
   const hr     = hrStatus(vitals.hr);
   const hsInfo = vitals.heart_rate_type ? HS[vitals.heart_rate_type] : null;
+  const ppgCat = ppgBP ? bpCategory(ppgBP.sbp, ppgBP.dbp) : null;
+  const ppgProgress = Math.min(100, Math.round((ppgSampleCount / PPG_REQUIRED_SAMPLES) * 100));
 
   return (
     <div className="space-y-4">
@@ -147,73 +232,74 @@ export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps
         {lastUpdated && <span className="text-xs text-[var(--muted-foreground)]">Updated {lastUpdated}</span>}
       </div>
 
-      {/* Vitals grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <VCard icon={<Heart className="w-4 h-4 text-rose-500" />}   label="Heart Rate"       unit="BPM"           value={vitals.hr}   valueColor={hr.color} sublabel={vitals.hr ? hr.label : ""} />
-        <VCard icon={<Wind className="w-4 h-4 text-indigo-500" />}  label="SpO₂"             unit="%"             value={vitals.spo2} valueColor={spo2Color(vitals.spo2)} />
-        <VCard icon={<Activity className="w-4 h-4 text-rose-500" />} label="Blood Pressure"  unit="mmHg SBP/DBP"  value={vitals.sbp && vitals.dbp ? `${vitals.sbp}/${vitals.dbp}` : null} valueColor="text-rose-700" />
-        <VCard icon={<Activity className="w-4 h-4 text-violet-500" />} label="Mean BP (MAP)" unit="mmHg"          value={vitals.mean_bp ? Math.round(vitals.mean_bp) : null} valueColor="text-violet-700" />
-        <VCard icon={<Droplets className="w-4 h-4 text-amber-500" />} label="Blood Sugar"    unit="mg/dL"         value={vitals.blood_sugar} valueColor="text-amber-700" />
+      {/* Vitals grid — CNN-BiLSTM model (ECG + PPG) */}
+      <div>
+        <p className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-widest mb-2 px-1">
+          Model 1 — CNN-BiLSTM (ECG + PPG)
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <VCard icon={<Heart className="w-4 h-4 text-rose-500" />}      label="Heart Rate"      unit="BPM"          value={vitals.hr}   valueColor={hr.color} sublabel={vitals.hr ? hr.label : ""} />
+          <VCard icon={<Wind className="w-4 h-4 text-indigo-500" />}     label="SpO₂"            unit="%"            value={vitals.spo2} valueColor={spo2Color(vitals.spo2)} />
+          <VCard icon={<Activity className="w-4 h-4 text-rose-500" />}   label="Blood Pressure"  unit="mmHg SBP/DBP" value={vitals.sbp && vitals.dbp ? `${vitals.sbp}/${vitals.dbp}` : null} valueColor="text-rose-700" />
+          <VCard icon={<Activity className="w-4 h-4 text-violet-500" />} label="Mean BP (MAP)"   unit="mmHg"         value={vitals.mean_bp ? Math.round(vitals.mean_bp) : null} valueColor="text-violet-700" />
+          <VCard icon={<Droplets className="w-4 h-4 text-amber-500" />}  label="Blood Sugar"     unit="mg/dL"        value={vitals.blood_sugar} valueColor="text-amber-700" />
 
-        {/* PCG card — patient-friendly */}
-        <div className={`border rounded-2xl p-4 col-span-2 md:col-span-1 ${hsInfo ? hsInfo.bg : "bg-[var(--muted)] border-[var(--border)]"}`}>
-          <div className="flex items-center gap-2 mb-3">
-            <div className="p-1.5 bg-white/60 rounded-lg">
-              <Stethoscope className={`w-4 h-4 ${hsInfo ? hsInfo.color : "text-slate-400"}`} />
-            </div>
-            <p className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wide">Heart Sound</p>
-          </div>
-          {vitals.heart_rate_type ? (
-            <>
-              {/* Condition name — prominent */}
-              <p className={`text-base font-bold leading-tight ${hsInfo?.color}`}>
-                {hsInfo?.full ?? vitals.heart_rate_type}
-              </p>
-              {/* Patient action message */}
-              <p className={`text-xs mt-1 font-medium ${hsInfo?.color}`}>
-                {hsInfo?.severity === "Normal"
-                  ? "No abnormality detected."
-                  : `${hsInfo?.full} detected — please consult your doctor.`}
-              </p>
-              {/* Severity badge */}
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                  hsInfo?.severity === "Normal"   ? "bg-emerald-100 text-emerald-700" :
-                  hsInfo?.severity === "High"     ? "bg-red-100 text-red-700"         :
-                                                    "bg-amber-100 text-amber-700"
-                }`}>
-                  {hsInfo?.severity === "Normal" ? "✓ Normal" : `⚠ ${hsInfo?.severity} severity`}
-                </span>
-                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-white/60 text-slate-600">
-                  {vitals.heart_rate_type}
-                </span>
+          {/* PCG / Heart Sound card */}
+          <div className={`border rounded-2xl p-4 col-span-2 md:col-span-1 ${hsInfo ? hsInfo.bg : "bg-[var(--muted)] border-[var(--border)]"}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 bg-white/60 rounded-lg">
+                <Stethoscope className={`w-4 h-4 ${hsInfo ? hsInfo.color : "text-slate-400"}`} />
               </div>
-              {/* Confidence bar */}
-              {vitals.heart_rate_type_confidence != null && (
-                <div className="mt-3">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-xs text-[var(--muted-foreground)]">AI confidence</span>
-                    <span className={`text-xs font-bold ${hsInfo?.color}`}>{(vitals.heart_rate_type_confidence * 100).toFixed(1)}%</span>
-                  </div>
-                  <div className="w-full bg-white/50 rounded-full h-1.5">
-                    <div
-                      className={`h-1.5 rounded-full ${hsInfo?.color.replace("text-", "bg-")}`}
-                      style={{ width: `${(vitals.heart_rate_type_confidence * 100).toFixed(1)}%` }}
-                    />
-                  </div>
+              <p className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wide">Heart Sound</p>
+            </div>
+            {vitals.heart_rate_type ? (
+              <>
+                <p className={`text-base font-bold leading-tight ${hsInfo?.color}`}>
+                  {hsInfo?.full ?? vitals.heart_rate_type}
+                </p>
+                <p className={`text-xs mt-1 font-medium ${hsInfo?.color}`}>
+                  {hsInfo?.severity === "Normal"
+                    ? "No abnormality detected."
+                    : `${hsInfo?.full} detected — please consult your doctor.`}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                    hsInfo?.severity === "Normal" ? "bg-emerald-100 text-emerald-700" :
+                    hsInfo?.severity === "High"   ? "bg-red-100 text-red-700"         :
+                                                    "bg-amber-100 text-amber-700"
+                  }`}>
+                    {hsInfo?.severity === "Normal" ? "✓ Normal" : `⚠ ${hsInfo?.severity} severity`}
+                  </span>
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-white/60 text-slate-600">
+                    {vitals.heart_rate_type}
+                  </span>
                 </div>
-              )}
-            </>
-          ) : <p className="text-slate-400 text-sm mt-1">Waiting for heart sound data…</p>}
+                {vitals.heart_rate_type_confidence != null && (
+                  <div className="mt-3">
+                    <div className="flex justify-between mb-1">
+                      <span className="text-xs text-[var(--muted-foreground)]">AI confidence</span>
+                      <span className={`text-xs font-bold ${hsInfo?.color}`}>{(vitals.heart_rate_type_confidence * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="w-full bg-white/50 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full ${hsInfo?.color.replace("text-", "bg-")}`}
+                        style={{ width: `${(vitals.heart_rate_type_confidence * 100).toFixed(1)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : <p className="text-slate-400 text-sm mt-1">Waiting for heart sound data…</p>}
+          </div>
         </div>
       </div>
 
-      {/* Probability bars */}
+      {/* Heart sound probability bars */}
       {vitals.heart_sound_all_probs && Object.keys(vitals.heart_sound_all_probs).length > 0 && (
         <div className="bg-[var(--muted)] border border-[var(--border)] rounded-2xl p-4">
           <p className="text-sm font-semibold text-[var(--foreground)] mb-3">Heart Sound — All Probabilities</p>
           <div className="space-y-2">
-            {Object.entries(vitals.heart_sound_all_probs).sort((a,b) => b[1]-a[1]).map(([cls, prob]) => {
+            {Object.entries(vitals.heart_sound_all_probs).sort((a, b) => b[1] - a[1]).map(([cls, prob]) => {
               const info  = HS[cls];
               const pct   = (prob * 100).toFixed(1);
               const isTop = cls === vitals.heart_rate_type;
@@ -230,6 +316,76 @@ export default function LiveSensor({ deviceId, onVitalsUpdate }: LiveSensorProps
           </div>
         </div>
       )}
+
+      {/* ── Model 2 — PPG-only GPR ────────────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-widest mb-2 px-1">
+          Model 2 — PPG-Only (Gaussian Process Regression)
+        </p>
+        <div className="bg-[var(--muted)] border border-[var(--border)] rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="p-1.5 bg-[var(--card)] rounded-lg">
+              <TrendingUp className="w-4 h-4 text-teal-500" />
+            </div>
+            <p className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wide">
+              PPG Blood Pressure Estimate
+            </p>
+            {ppgBP && (
+              <span className="ml-auto text-xs text-[var(--muted-foreground)]">
+                {ppgBP.n_segments} seg · {ppgBP.duration_sec}s
+              </span>
+            )}
+          </div>
+
+          {ppgBP ? (
+            <div className="space-y-3">
+              {/* SBP / DBP values */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)]">
+                  <p className="text-xs text-[var(--muted-foreground)] mb-1">Systolic (SBP)</p>
+                  <p className="text-2xl font-bold text-teal-600">{ppgBP.sbp.toFixed(1)}</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">mmHg ± {ppgBP.sbp_std.toFixed(1)}</p>
+                </div>
+                <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)]">
+                  <p className="text-xs text-[var(--muted-foreground)] mb-1">Diastolic (DBP)</p>
+                  <p className="text-2xl font-bold text-teal-600">{ppgBP.dbp.toFixed(1)}</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">mmHg ± {ppgBP.dbp_std.toFixed(1)}</p>
+                </div>
+              </div>
+
+              {/* BP category badge */}
+              {ppgCat && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${ppgCat.bg}`}>
+                  <span className={`text-sm font-semibold ${ppgCat.color}`}>{ppgCat.label}</span>
+                  <span className="text-xs text-[var(--muted-foreground)] ml-auto">{ppgBP.model_name}</span>
+                </div>
+              )}
+            </div>
+          ) : ppgLoading ? (
+            <div className="flex items-center gap-3 py-2">
+              <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <p className="text-sm text-[var(--muted-foreground)]">Running PPG model inference…</p>
+            </div>
+          ) : ppgError ? (
+            <p className="text-sm text-amber-600">{ppgError}</p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-[var(--muted-foreground)]">
+                Collecting PPG data… ({ppgSampleCount} / {PPG_REQUIRED_SAMPLES} samples needed)
+              </p>
+              <div className="w-full bg-[var(--border)] rounded-full h-1.5">
+                <div
+                  className="h-1.5 rounded-full bg-teal-500 transition-all duration-300"
+                  style={{ width: `${ppgProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                ~30 seconds of PPG signal required for this model
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ECG waveform */}
       <div className="bg-slate-900 rounded-2xl p-5 border-2 border-slate-700">

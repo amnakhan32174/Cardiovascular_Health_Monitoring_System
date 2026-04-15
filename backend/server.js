@@ -9,6 +9,16 @@ const { Server } = require("socket.io");
 
 const { predictBP, predictHeartRateType, predictHeartSoundType, getAvailableWavFiles } =
   require("./services/mlService");
+let recordPCG, recordPPG, isRecordingActive, getComPort;
+try {
+  ({ recordPCG, recordPPG, isRecordingActive, getComPort } = require("./services/serialService"));
+  console.log("✅ Serial service loaded");
+} catch (err) {
+  console.warn("⚠️  Serial service unavailable:", err.message);
+  recordPCG = recordPPG = async () => { throw new Error("serialport not installed — run: npm install serialport @serialport/parser-readline"); };
+  isRecordingActive = () => false;
+  getComPort = () => process.env.ESP32_COM_PORT || "COM6";
+}
 const { initDatabase, saveReading, getRecentVitals, getLatestReading, getStats } =
   require("./db/database");
 const { saveSensorReading, getPatientReadings, getLatestPatientReading } =
@@ -167,6 +177,34 @@ app.get("/api/patient-readings/:patientId/latest", async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MANUAL RECORDING ENDPOINTS  (dashboard buttons → USB serial → ML models)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// POST /api/record/pcg  — record 60 s of heart sound via INMP441, classify
+app.post("/api/record/pcg", (_req, res) => {
+  if (isRecordingActive()) {
+    return res.status(409).json({ ok: false, error: "Another recording is already in progress" });
+  }
+  res.json({ ok: true, message: "PCG recording started", duration: 60 });
+  // Run async — results pushed via Socket.IO
+  recordPCG(io).catch(err => console.error("❌ PCG recording:", err.message));
+});
+
+// POST /api/record/ppg  — send PPG_REC, record 120 s of IR/Red, predict BP
+app.post("/api/record/ppg", (_req, res) => {
+  if (isRecordingActive()) {
+    return res.status(409).json({ ok: false, error: "Another recording is already in progress" });
+  }
+  res.json({ ok: true, message: "PPG recording started", duration: 120 });
+  recordPPG(io).catch(err => console.error("❌ PPG recording:", err.message));
+});
+
+// GET /api/record/status  — check whether a recording is running
+app.get("/api/record/status", (_req, res) => {
+  res.json({ ok: true, recording: isRecordingActive(), comPort: getComPort() });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

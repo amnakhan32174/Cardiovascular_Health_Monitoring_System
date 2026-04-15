@@ -50,6 +50,7 @@ export default function SidebarLayout({ children, role }: SidebarLayoutProps) {
     localStorage.removeItem("isLoggedIn");
     localStorage.removeItem("userRole");
     localStorage.removeItem("userId");
+    sessionStorage.removeItem("isLoggedIn"); // clears session-only login flag
     navigate("/login");
   };
 

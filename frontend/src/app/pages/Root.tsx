@@ -6,8 +6,9 @@ export default function Root() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const isLoggedIn = localStorage.getItem("isLoggedIn");
-    const userRole = localStorage.getItem("userRole");
+    const isLoggedIn = localStorage.getItem("isLoggedIn") || sessionStorage.getItem("isLoggedIn");
+    const rawRole = localStorage.getItem("userRole") || sessionStorage.getItem("userRole");
+    const userRole = rawRole?.toLowerCase().trim();
 
     if (isLoggedIn === "true") {
       if (userRole === "admin") {

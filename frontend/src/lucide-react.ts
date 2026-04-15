@@ -47,4 +47,6 @@ export {
   LuMoon as Moon,
   LuShield as Shield,
   LuSmartphone as Smartphone,
+  LuTrendingUp as TrendingUp,
+  LuMic as Mic,
 } from "react-icons/lu";

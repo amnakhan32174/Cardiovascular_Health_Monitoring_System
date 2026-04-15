@@ -194,33 +194,68 @@ async function predictHeartRateType(sensorData) {
   /**
    * Called from server.js for each incoming sensor reading.
    *
-   * Current mode: uses WAV files from data/ folder (demo/test mode).
-   * Future mode:  when sensorData.pcg contains real microphone audio,
-   *               call /predict-signal with actual PCG samples.
+   * Mode A (preferred): real INMP441 PCG data from ESP32
+   *   - sensorData.pcg must have ≥ 500 samples
+   *   - sends to /predict-signal with source="esp32" so the server applies
+   *     the INMP441 spectral correction curve before MFCC extraction
    *
-   * NOTE: We do NOT use sensorData.ecg as PCG input — ECG is an electrical
-   *       signal; PCG is acoustic. They are completely different and the model
-   *       was trained only on acoustic heart sounds.
+   * Mode B (fallback): WAV files from data/ folder (demo/offline mode)
+   *   - used when no real PCG data is present in the payload
+   *
+   * NOTE: ECG arrays must NOT be used as PCG input — they are completely
+   *       different signal types (electrical vs acoustic).
    */
 
   if (!isPcgUrlConfigured()) return null;
 
-  // ── Future: real PCG microphone data ──────────────────────────────────────
-  // When your hardware sends actual PCG audio (microphone/digital stethoscope):
-  //
-  //   if (sensorData.pcg && sensorData.pcg.length >= 500) {
-  //     const url = `${pcgBaseUrl()}/predict-signal`;
-  //     const response = await axios.post(url, {
-  //       pcg: sensorData.pcg,
-  //       sample_rate: sensorData.pcg_sample_rate || 2000
-  //     }, { timeout: 15000 });
-  //     return { heart_rate_type: response.data.heart_sound_type, ... };
-  //   }
+  // ── Mode A: real INMP441 PCG data from ESP32 ─────────────────────────────
+  if (sensorData.pcg && sensorData.pcg.length >= 500) {
+    const url = `${pcgBaseUrl()}/predict-signal`;
+    try {
+      console.log(
+        `📤 PCG real-signal predict: ${sensorData.pcg.length} samples ` +
+        `@ ${sensorData.pcg_sample_rate || 2000} Hz → ${url}`
+      );
 
-  // ── Current: WAV file mode ─────────────────────────────────────────────────
+      const response = await axios.post(
+        url,
+        {
+          pcg:         sensorData.pcg,
+          sample_rate: sensorData.pcg_sample_rate || 2000,
+          source:      "esp32",          // triggers INMP441 correction in pcg_server.py
+        },
+        { headers: { "Content-Type": "application/json" }, timeout: 20000 }
+      );
+
+      const data = response.data;
+      if (data && data.heart_sound_type) {
+        console.log(
+          `💓 PCG result (real signal): ${data.heart_sound_type} ` +
+          `(confidence=${(data.confidence * 100).toFixed(1)}%)`
+        );
+        return {
+          heart_rate_type:   data.heart_sound_type,
+          heart_sound_type:  data.heart_sound_type,
+          confidence:        data.confidence || 0,
+          class_index:       data.class_index ?? 0,
+          all_probabilities: data.details?.all_probabilities || {},
+          source_file:       "esp32_inmp441",
+        };
+      }
+    } catch (error) {
+      if (error.code === "ECONNREFUSED") {
+        console.error("❌ PCG real-signal prediction failed: service not running on", PCG_MODEL_URL);
+      } else {
+        console.error("❌ PCG real-signal prediction failed:", error.message);
+      }
+      // fall through to WAV fallback
+    }
+  }
+
+  // ── Mode B: WAV file fallback ──────────────────────────────────────────────
   const files = getAvailableWavFiles();
   if (files.length === 0) {
-    console.warn("⚠️  No WAV files available for PCG prediction");
+    console.warn("⚠️  No WAV files available for PCG fallback prediction");
     return null;
   }
 
@@ -228,6 +263,7 @@ async function predictHeartRateType(sensorData) {
   const filename = files[wavFileIndex % files.length];
   wavFileIndex++;
 
+  console.log(`📁 PCG fallback: using WAV file "${filename}"`);
   return await predictHeartSoundType(filename);
 }
 

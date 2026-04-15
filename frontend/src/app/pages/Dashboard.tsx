@@ -8,11 +8,13 @@ import PCGTestResults from "../components/PCGTestResults";
 import BloodSugarForm from "../components/forms/BloodSugarForm";
 import QuestionnaireForm from "../components/forms/QuestionnaireForm";
 import SnapshotButton from "../components/SnapshotButton";
+import RecordingPanel from "../components/RecordingPanel";
 import {
   addDoc, collection, serverTimestamp, query, orderBy,
   limit, onSnapshot, where, doc, getDoc
 } from "firebase/firestore";
-import { db } from "../../firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "../../firebase";
 
 // ── Tab definition ────────────────────────────────────────────────────────────
 const TABS = [
@@ -76,65 +78,104 @@ export default function Dashboard() {
   const [latestBloodSugar, setLatestBloodSugar] = useState<number | null>(null);
   const [bloodSugarHistory, setBloodSugarHistory] = useState<any[]>([]);
   const [vitalsHistory, setVitalsHistory]           = useState<any[]>([]);
+  const [sensorHistory, setSensorHistory]           = useState<any[]>([]);
   const [assignedDoctorId, setAssignedDoctorId]   = useState<string | null>(null);
   const [emergencyReason, setEmergencyReason]     = useState("");
   const [sendingEmergency, setSendingEmergency]   = useState(false);
   const [emergencySent, setEmergencySent]         = useState(false);
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "dashboard");
 
+  // Sync active tab when URL changes (e.g. sidebar navigation)
+  useEffect(() => {
+    setActiveTab(searchParams.get("tab") || "dashboard");
+  }, [searchParams]);
+
   useEffect(() => {
     const savedProfile = JSON.parse(localStorage.getItem("userProfile") || "{}");
     if (savedProfile) setProfile(savedProfile);
 
-    const patientId = localStorage.getItem("userId");
-    if (!patientId) return;
+    let unsub1: (() => void) | null = null;
+    let unsub2: (() => void) | null = null;
 
-    // Load assigned doctor
-    const loadAssignedDoctor = async () => {
-      try {
-        const saved = localStorage.getItem("userData");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed?.assignedDoctorId) { setAssignedDoctorId(parsed.assignedDoctorId); return; }
-        }
-        const userDoc = await getDoc(doc(db, "users", patientId));
-        if (userDoc.exists()) {
-          const data: any = userDoc.data();
-          setAssignedDoctorId(data.assignedDoctorId || null);
-        }
-      } catch (err) { console.error(err); }
-    };
-    loadAssignedDoctor();
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        // Auth token expired or invalid — clear stale session and redirect to login
+        localStorage.removeItem("isLoggedIn");
+        localStorage.removeItem("userId");
+        localStorage.removeItem("userRole");
+        localStorage.removeItem("userData");
+        localStorage.removeItem("userProfile");
+        navigate("/login");
+        return;
+      }
 
-    // Blood sugar live listener
-    const bsQuery = query(
-      collection(db, "bloodSugarReadings"),
-      where("patientId", "==", patientId),
-      orderBy("timestamp", "desc"), limit(1)
-    );
-    const unsub1 = onSnapshot(bsQuery, snap => {
-      if (!snap.empty) setLatestBloodSugar(snap.docs[0].data().blood_sugar);
-    });
+      const patientId = user.uid;
+      localStorage.setItem("userId", patientId);
 
-    const histQuery = query(
-      collection(db, "bloodSugarReadings"),
-      where("patientId", "==", patientId),
-      orderBy("timestamp", "desc"), limit(20)
-    );
-    const unsub2 = onSnapshot(histQuery, snap => {
-      const readings: any[] = [];
-      snap.forEach(d => {
-        const data = d.data();
-        readings.push({
-          id: d.id, ...data,
-          displayTime: data.timestamp?.toDate ? data.timestamp.toDate().toLocaleString() : "—"
-        });
+      // Load assigned doctor
+      const loadAssignedDoctor = async () => {
+        try {
+          const saved = localStorage.getItem("userData");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed?.assignedDoctorId) { setAssignedDoctorId(parsed.assignedDoctorId); return; }
+          }
+          const userDoc = await getDoc(doc(db, "users", patientId));
+          if (userDoc.exists()) {
+            const data: any = userDoc.data();
+            setAssignedDoctorId(data.assignedDoctorId || null);
+          }
+        } catch (err) { console.error(err); }
+      };
+      loadAssignedDoctor();
+
+      // Sensor readings history from backend
+      const fetchSensorHistory = async () => {
+        try {
+          const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || "http://localhost:5000";
+          const res = await fetch(`${backendUrl}/api/patient-readings/${patientId}?limit=10`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.ok && Array.isArray(data.readings)) setSensorHistory(data.readings);
+          }
+        } catch { /* backend may not be running */ }
+      };
+      fetchSensorHistory();
+
+      // Blood sugar live listener
+      const bsQuery = query(
+        collection(db, "bloodSugarReadings"),
+        where("patientId", "==", patientId),
+        orderBy("timestamp", "desc"), limit(1)
+      );
+      unsub1 = onSnapshot(bsQuery, snap => {
+        if (!snap.empty) setLatestBloodSugar(snap.docs[0].data().blood_sugar);
       });
-      setBloodSugarHistory(readings);
+
+      const histQuery = query(
+        collection(db, "bloodSugarReadings"),
+        where("patientId", "==", patientId),
+        orderBy("timestamp", "desc"), limit(20)
+      );
+      unsub2 = onSnapshot(histQuery, snap => {
+        const readings: any[] = [];
+        snap.forEach(d => {
+          const data = d.data();
+          readings.push({
+            id: d.id, ...data,
+            displayTime: data.timestamp?.toDate ? data.timestamp.toDate().toLocaleString() : "—"
+          });
+        });
+        setBloodSugarHistory(readings);
+      });
     });
 
-    return () => { unsub1(); unsub2(); };
-  }, []);
+    return () => {
+      unsubAuth();
+      unsub1?.();
+      unsub2?.();
+    };
+  }, [navigate]);
 
   const sendEmergencyAlert = async () => {
     const patientId = localStorage.getItem("userId");
@@ -175,6 +216,11 @@ export default function Dashboard() {
   const handleVitalsUpdate = (v: any) => {
     setCurrentVitals(v);
     setVitalsHistory(prev => [...prev, v].slice(-20));
+    // Add live reading to sensor history display (prepend)
+    setSensorHistory(prev => [
+      { ...v, displayTime: new Date().toLocaleString() },
+      ...prev
+    ].slice(0, 10));
   };
 
   const displayVitals = currentVitals
@@ -240,6 +286,9 @@ export default function Dashboard() {
         {/* ── Dashboard tab ──────────────────────────────────────────────────── */}
         {activeTab === "dashboard" && (
           <div className="space-y-6">
+            {/* Manual recording buttons */}
+            <RecordingPanel />
+
             {/* Live sensor */}
             <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-5">
@@ -272,6 +321,51 @@ export default function Dashboard() {
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Sensor readings history */}
+            <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 shadow-sm">
+              <h3 className="text-base font-semibold text-[var(--foreground)] mb-4">Sensor Readings History</h3>
+              {sensorHistory.length === 0 ? (
+                <p className="text-sm text-[var(--muted-foreground)]">No stored readings yet. Connect your ESP32 device to start recording.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wide border-b border-[var(--border)]">
+                        <th className="pb-2 pr-4">Time</th>
+                        <th className="pb-2 pr-4">HR (BPM)</th>
+                        <th className="pb-2 pr-4">SpO₂ (%)</th>
+                        <th className="pb-2 pr-4">BP (mmHg)</th>
+                        <th className="pb-2">Heart Sound</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {sensorHistory.map((r: any, i: number) => (
+                        <tr key={r.id || i} className="hover:bg-[var(--muted)] transition-colors">
+                          <td className="py-2 pr-4 text-[var(--muted-foreground)] whitespace-nowrap">
+                            {r.displayTime || (r.timestamp ? new Date(r.timestamp).toLocaleString() : "—")}
+                          </td>
+                          <td className="py-2 pr-4 font-medium text-rose-600">{r.hr ?? "—"}</td>
+                          <td className="py-2 pr-4 font-medium text-indigo-600">{r.spo2 ?? "—"}</td>
+                          <td className="py-2 pr-4 font-medium text-violet-600">
+                            {r.sbp && r.dbp ? `${r.sbp}/${r.dbp}` : "—"}
+                          </td>
+                          <td className="py-2">
+                            {r.heart_rate_type ? (
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                r.heart_rate_type === "N" ? "bg-emerald-100 text-emerald-700"
+                                : r.heart_rate_type === "AS" ? "bg-red-100 text-red-700"
+                                : "bg-amber-100 text-amber-700"
+                              }`}>{r.heart_rate_type}</span>
+                            ) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

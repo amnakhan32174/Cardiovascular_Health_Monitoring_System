@@ -1,16 +1,26 @@
 // src/app/pages/Profile.tsx
 import React, { useState, useEffect } from "react";
 import { User, Save, Camera, CheckCircle } from "lucide-react";
+import { LuMail as Mail } from "react-icons/lu";
 import SidebarLayout from "../components/Sidebar";
+import { auth } from "../../firebase";
+import { updateEmail, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
 
 export default function Profile() {
   const role = (localStorage.getItem("userRole") || "patient") as "patient" | "doctor" | "admin";
   const [profile, setProfile] = useState({ name: "", age: "", sex: "" });
   const [saved, setSaved]     = useState(false);
+  const [newEmail, setNewEmail]         = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [emailMsg, setEmailMsg]         = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
 
   useEffect(() => {
     const s = localStorage.getItem("userProfile");
     if (s) { try { setProfile(JSON.parse(s)); } catch {} }
+    // Pre-fill new email with current email
+    const currentUser = auth.currentUser;
+    if (currentUser?.email) setNewEmail(currentUser.email);
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -25,7 +35,43 @@ export default function Profile() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const email  = JSON.parse(localStorage.getItem("userData") || "{}").email || "—";
+  const handleEmailUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const currentUser = auth.currentUser;
+    if (!currentUser || !currentUser.email) {
+      setEmailMsg({ type: "error", text: "No user logged in." });
+      return;
+    }
+    if (!newEmail.trim() || newEmail === currentUser.email) {
+      setEmailMsg({ type: "error", text: "Please enter a different email address." });
+      return;
+    }
+    if (!currentPassword) {
+      setEmailMsg({ type: "error", text: "Enter your current password to confirm." });
+      return;
+    }
+    setEmailLoading(true);
+    try {
+      // Re-authenticate first (required by Firebase for sensitive operations)
+      const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updateEmail(currentUser, newEmail.trim());
+      setEmailMsg({ type: "success", text: "Email updated successfully!" });
+      setCurrentPassword("");
+    } catch (err: any) {
+      const msg =
+        err.code === "auth/wrong-password"     ? "Current password is incorrect."      :
+        err.code === "auth/email-already-in-use" ? "That email is already in use."     :
+        err.code === "auth/invalid-email"      ? "Invalid email address."              :
+        err.code === "auth/requires-recent-login" ? "Please log out and log back in first." :
+        err.message || "Failed to update email.";
+      setEmailMsg({ type: "error", text: msg });
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const email  = auth.currentUser?.email || JSON.parse(localStorage.getItem("userData") || "{}").email || "—";
   const initials = profile.name
     ? profile.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
     : "U";
@@ -106,6 +152,48 @@ export default function Profile() {
               }`}
             >
               {saved ? <><CheckCircle className="w-4 h-4" /> Saved!</> : <><Save className="w-4 h-4" /> Save Profile</>}
+            </button>
+          </form>
+        </div>
+
+        {/* Email change */}
+        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 shadow-sm">
+          <div className="flex items-center gap-3 mb-5">
+            <Mail className="w-5 h-5 text-rose-500" />
+            <h3 className="text-base font-semibold text-[var(--foreground)]">Change Email Address</h3>
+          </div>
+          {emailMsg && (
+            <div className={`mb-4 p-3 rounded-xl text-sm font-medium border ${
+              emailMsg.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                : "bg-red-50 border-red-200 text-red-700"
+            }`}>
+              {emailMsg.text}
+            </div>
+          )}
+          <form onSubmit={handleEmailUpdate} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-[var(--foreground)] mb-2">New Email Address</label>
+              <input
+                type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
+                className="w-full p-3 border border-[var(--border)] rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-[var(--input-background)] text-sm transition"
+                placeholder="Enter new email" required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Current Password (required to confirm)</label>
+              <input
+                type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+                className="w-full p-3 border border-[var(--border)] rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-[var(--input-background)] text-sm transition"
+                placeholder="Your current password" required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={emailLoading}
+              className="w-full py-3 rounded-xl font-semibold text-sm transition-all shadow-sm bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-50"
+            >
+              {emailLoading ? "Updating…" : "Update Email"}
             </button>
           </form>
         </div>
